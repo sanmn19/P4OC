@@ -39,11 +39,12 @@ import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 
 /**
- * Tab bar showing all open tabs with indicators. Closeable tabs close on long press —
- * the 30dp strip has no room for a legible persistent action.
+ * Tab bar showing all open tabs with indicators. Closeable tabs carry a compact trailing
+ * close glyph; long press on the tab body remains an additional close gesture.
  * Reuses visual language from SessionStatusBar.
  */
 private data class TabIndicatorState(
+    val id: String,
     val title: String,
     val icon: ImageVector,
     val serverBadge: String?,
@@ -94,6 +95,7 @@ fun TabBar(
                 tabs.firstOrNull { it.isPinnedHome }?.let { home ->
                     tabIndicator(
                         state = TabIndicatorState(
+                            id = home.id,
                             title = tabTitles.getValue(home.id),
                             icon = tabIcons.getValue(home.id),
                             serverBadge = null,
@@ -141,6 +143,7 @@ fun TabBar(
 
                         tabIndicator(
                             state = TabIndicatorState(
+                                id = tab.id,
                                 title = title,
                                 icon = tabIcons.getValue(tab.id),
                                 serverBadge = tab.serverRef?.badgeLabel,
@@ -201,7 +204,7 @@ private fun tabIndicator(
     // Active tab gets a 2px primary top-border strip — the design's key tab signature.
     val topStripColor = if (state.isActive) theme.primary else Color.Transparent
     Column(
-        modifier = Modifier
+        modifier = modifier
             .height(Sizing.tabBarHeight)
             .background(backgroundColor)
             .drawBehind {
@@ -223,7 +226,6 @@ private fun tabIndicator(
             tabIndicatorRow(
                 state = state,
                 needsAttention = needsAttention,
-                modifier = modifier,
             )
         }
     }
@@ -234,7 +236,6 @@ private fun tabIndicator(
 private fun tabIndicatorRow(
     state: TabIndicatorState,
     needsAttention: Boolean,
-    modifier: Modifier = Modifier,
 ) {
     val theme = LocalOpenCodeTheme.current
     val haptic = LocalHapticFeedback.current
@@ -253,14 +254,15 @@ private fun tabIndicatorRow(
         Modifier.clickable(onClick = state.onClick, role = Role.Tab)
     }
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxHeight()
             .then(selectModifier)
             .semantics {
                 contentDescription = state.accessibilityLabel
                 selected = state.isActive
             }
-            .padding(horizontal = Spacing.md),
+            .testTag(if (state.closeable) "work_tab_${state.id}_body" else "tab_home_body")
+            .padding(start = Spacing.md, end = if (state.closeable) Spacing.xxs else Spacing.md),
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -277,6 +279,25 @@ private fun tabIndicatorRow(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.widthIn(max = Sizing.panelWidthSm),
         )
+        if (state.closeable) {
+            // Own click target: closes without ever selecting the tab underneath.
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .clickable(role = Role.Button, onClick = state.onClose)
+                    .padding(horizontal = Spacing.sm)
+                    .semantics { contentDescription = closeLabel }
+                    .testTag("work_tab_${state.id}_close"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = null,
+                    modifier = Modifier.size(Sizing.iconXs),
+                    tint = if (state.isActive) theme.text else theme.textMuted,
+                )
+            }
+        }
     }
 }
 
