@@ -35,9 +35,9 @@ android {
     defaultConfig {
         applicationId = "dev.blazelight.p4oc"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 17
-        versionName = "0.13.0"
+        targetSdk = 36
+        versionCode = 18
+        versionName = "0.14.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
