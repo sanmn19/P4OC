@@ -49,11 +49,11 @@ data class ModelRef(
 
 @Serializable
 data class TokenUsage(
-    val input: Int,
-    val output: Int,
-    val reasoning: Int = 0,
-    val cacheRead: Int = 0,
-    val cacheWrite: Int = 0
+    val input: Long,
+    val output: Long,
+    val reasoning: Long = 0L,
+    val cacheRead: Long = 0L,
+    val cacheWrite: Long = 0L
 )
 
 @Serializable

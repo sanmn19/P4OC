@@ -187,8 +187,8 @@ class EventMapperTest {
         assertEquals("claude-3", assistant.modelID)
         assertEquals("build", assistant.agent)
         assertEquals(0.05, assistant.cost, 0.001)
-        assertEquals(100, assistant.tokens.input)
-        assertEquals(200, assistant.tokens.output)
+        assertEquals(100L, assistant.tokens.input)
+        assertEquals(200L, assistant.tokens.output)
     }
 
     // ── message.part.updated ────────────────────────────────────────────────

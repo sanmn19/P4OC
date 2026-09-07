@@ -29,7 +29,7 @@ class ChatPresentationBehaviorTest {
         )
 
         assertEquals(
-            AssistantContextUsage(tokens = 100, providerID = "anthropic", modelID = "claude"),
+            AssistantContextUsage(tokens = 100L, providerID = "anthropic", modelID = "claude"),
             latestAssistantContextUsage(listOf(completed, streaming)),
         )
     }
@@ -50,8 +50,29 @@ class ChatPresentationBehaviorTest {
         )
 
         assertEquals(
-            AssistantContextUsage(tokens = 50, providerID = "openai", modelID = "gpt"),
+            AssistantContextUsage(tokens = 50L, providerID = "openai", modelID = "gpt"),
             latestAssistantContextUsage(listOf(older, current)),
+        )
+    }
+
+    @Test
+    fun latestAssistantContextUsage_retains64BitCumulativeTotal() {
+        val completed = assistantMessage(
+            id = "completed",
+            providerID = "openai",
+            modelID = "gpt",
+            tokens = TokenUsage(
+                input = 2_147_483_648L,
+                output = 2_147_483_649L,
+                reasoning = 2_147_483_650L,
+                cacheRead = 2_371_688_120L,
+                cacheWrite = 2_147_483_651L,
+            ),
+        )
+
+        assertEquals(
+            AssistantContextUsage(tokens = 10_961_622_718L, providerID = "openai", modelID = "gpt"),
+            latestAssistantContextUsage(listOf(completed)),
         )
     }
 

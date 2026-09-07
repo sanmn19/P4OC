@@ -279,6 +279,30 @@ class PartMapperTest {
     }
 
     @Test
+    fun `maps 64-bit step finish token accounting`() {
+        val dto = PartDto(
+            id = "part-tokens",
+            sessionID = "sess-1",
+            messageID = "msg-1",
+            type = "step-finish",
+            tokens = TokenUsageDto(
+                input = 2_147_483_648L,
+                output = 2_147_483_649L,
+                reasoning = 2_147_483_650L,
+                cache = TokenCacheDto(read = 2_371_688_120L, write = 2_147_483_651L)
+            )
+        )
+
+        val part = PartMapper.mapToDomain(dto) as Part.StepFinish
+
+        assertEquals(2_147_483_648L, part.tokens?.input)
+        assertEquals(2_147_483_649L, part.tokens?.output)
+        assertEquals(2_147_483_650L, part.tokens?.reasoning)
+        assertEquals(2_371_688_120L, part.tokens?.cacheRead)
+        assertEquals(2_147_483_651L, part.tokens?.cacheWrite)
+    }
+
+    @Test
     fun `unknown type falls back to Text`() {
         val dto = PartDto(
             id = "part-5",
@@ -332,7 +356,7 @@ class MessageMapperTest {
     }
 
     @Test
-    fun `maps assistant message with tokens`() {
+    fun `maps assistant message with 64-bit tokens`() {
         val dto = MessageInfoDto(
             id = "msg-2",
             sessionID = "sess-1",
@@ -345,10 +369,10 @@ class MessageMapperTest {
             agent = "build",
             cost = 0.123,
             tokens = TokenUsageDto(
-                input = 500,
-                output = 300,
-                reasoning = 50,
-                cache = TokenCacheDto(read = 10, write = 20)
+                input = 2_147_483_648L,
+                output = 2_147_483_649L,
+                reasoning = 2_147_483_650L,
+                cache = TokenCacheDto(read = 2_371_688_120L, write = 2_147_483_651L)
             ),
             path = MessagePathDto(cwd = "/home/user", root = "/home"),
             finish = "end_turn"
@@ -368,11 +392,11 @@ class MessageMapperTest {
         assertEquals("default", assistant.mode)
         assertEquals("build", assistant.agent)
         assertEquals(0.123, assistant.cost, 0.0001)
-        assertEquals(500, assistant.tokens.input)
-        assertEquals(300, assistant.tokens.output)
-        assertEquals(50, assistant.tokens.reasoning)
-        assertEquals(10, assistant.tokens.cacheRead)
-        assertEquals(20, assistant.tokens.cacheWrite)
+        assertEquals(2_147_483_648L, assistant.tokens.input)
+        assertEquals(2_147_483_649L, assistant.tokens.output)
+        assertEquals(2_147_483_650L, assistant.tokens.reasoning)
+        assertEquals(2_371_688_120L, assistant.tokens.cacheRead)
+        assertEquals(2_147_483_651L, assistant.tokens.cacheWrite)
         assertNotNull(assistant.path)
         assertEquals("/home/user", assistant.path!!.cwd)
         assertEquals("/home", assistant.path!!.root)

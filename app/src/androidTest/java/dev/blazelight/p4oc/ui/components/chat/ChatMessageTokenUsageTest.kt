@@ -22,7 +22,7 @@ class ChatMessageTokenUsageTest {
     fun completedAssistantDisplaysTokenUsageAndCost() {
         setAssistantUsage(
             tokens = TokenUsage(
-                input = Int.MAX_VALUE,
+                input = Int.MAX_VALUE.toLong(),
                 output = 1,
                 reasoning = 2,
                 cacheRead = 3,

@@ -101,7 +101,7 @@ fun ModelAgentSelectorBar(
     favoriteModels: Set<ModelInput> = emptySet(),
     recentModels: List<ModelInput> = emptyList(),
     onToggleFavorite: (ModelInput) -> Unit = {},
-    usedContextTokens: Int? = null,
+    usedContextTokens: Long? = null,
     contextUsageModel: ModelInput? = null,
     providerNames: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier
@@ -283,9 +283,10 @@ fun ModelAgentSelectorBar(
             if (usedContextTokens != null && ctxWindow != null && ctxWindow > 0) {
                 Spacer(Modifier.width(Spacing.sm))
                 ContextUsageMeter(
-                    percent = (usedContextTokens.toLong() * PERCENT_SCALE / ctxWindow)
-                        .toInt()
-                        .coerceIn(0, PERCENT_SCALE),
+                    percent = (
+                        usedContextTokens.coerceIn(0L, ctxWindow.toLong()) *
+                            PERCENT_SCALE / ctxWindow
+                        ).toInt(),
                 )
             }
         }

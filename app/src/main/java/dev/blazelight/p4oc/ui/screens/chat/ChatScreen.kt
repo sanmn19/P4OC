@@ -782,7 +782,7 @@ fun ChatScreen(
 }
 
 internal data class AssistantContextUsage(
-    val tokens: Int,
+    val tokens: Long,
     val providerID: String,
     val modelID: String,
 )
@@ -792,13 +792,13 @@ internal fun latestAssistantContextUsage(messages: List<MessageWithParts>): Assi
         val assistant = messageWithParts.message as? Message.Assistant
             ?: return@firstNotNullOfOrNull null
         val tokens = assistant.tokens.run {
-            input.toLong() + output + reasoning + cacheRead + cacheWrite
+            input + output + reasoning + cacheRead + cacheWrite
         }
         if (tokens <= 0L) {
             null
         } else {
             AssistantContextUsage(
-                tokens = tokens.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                tokens = tokens,
                 providerID = assistant.providerID,
                 modelID = assistant.modelID,
             )

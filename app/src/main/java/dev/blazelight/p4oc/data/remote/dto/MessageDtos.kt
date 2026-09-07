@@ -55,16 +55,16 @@ data class ModelRefDto(
 
 @Serializable
 data class TokenUsageDto(
-    val input: Int = 0,
-    val output: Int = 0,
-    val reasoning: Int = 0,
+    val input: Long = 0L,
+    val output: Long = 0L,
+    val reasoning: Long = 0L,
     val cache: TokenCacheDto? = null
 )
 
 @Serializable
 data class TokenCacheDto(
-    val read: Int = 0,
-    val write: Int = 0
+    val read: Long = 0L,
+    val write: Long = 0L
 )
 
 // ============================================================================

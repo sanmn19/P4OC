@@ -125,7 +125,7 @@ class MessageMapper {
             mode = dto.mode ?: "",
             agent = dto.agent ?: "",
             cost = dto.cost ?: 0.0,
-            tokens = dto.tokens?.let { mapTokensToDomain(it) } ?: TokenUsage(0, 0),
+            tokens = dto.tokens?.let { mapTokensToDomain(it) } ?: TokenUsage(0L, 0L),
             path = dto.path?.let { MessagePath(it.cwd ?: "", it.root ?: "") },
             error = dto.error?.let { mapMessageErrorToDomain(it) },
             finish = dto.finish,
@@ -143,8 +143,8 @@ class MessageMapper {
         input = dto.input,
         output = dto.output,
         reasoning = dto.reasoning,
-        cacheRead = dto.cache?.read ?: 0,
-        cacheWrite = dto.cache?.write ?: 0
+        cacheRead = dto.cache?.read ?: 0L,
+        cacheWrite = dto.cache?.write ?: 0L
     )
 
     private fun mapMessageErrorToDomain(dto: MessageErrorDto): MessageError {
@@ -321,8 +321,8 @@ object PartMapper {
         input = dto.input,
         output = dto.output,
         reasoning = dto.reasoning,
-        cacheRead = dto.cache?.read ?: 0,
-        cacheWrite = dto.cache?.write ?: 0
+        cacheRead = dto.cache?.read ?: 0L,
+        cacheWrite = dto.cache?.write ?: 0L
     )
 
     private fun mapAgentSourceToDomain(source: JsonObject): AgentPartSource? {

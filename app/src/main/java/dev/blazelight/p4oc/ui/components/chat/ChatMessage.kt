@@ -670,7 +670,7 @@ private fun CompactPatchPart(part: Part.Patch) {
 }
 
 private fun TokenUsage.hasUsage(): Boolean =
-    (input or output or reasoning or cacheRead or cacheWrite) != 0
+    input != 0L || output != 0L || reasoning != 0L || cacheRead != 0L || cacheWrite != 0L
 
 private const val MINIMUM_VISIBLE_COST = 0.0001
 
@@ -678,11 +678,11 @@ private const val MINIMUM_VISIBLE_COST = 0.0001
 @Suppress("FunctionNaming")
 private fun TokenUsageInfo(tokens: TokenUsage, cost: Double, modifier: Modifier = Modifier) {
     val theme = LocalOpenCodeTheme.current
-    val total = tokens.input.toLong() +
-        tokens.output.toLong() +
-        tokens.reasoning.toLong() +
-        tokens.cacheRead.toLong() +
-        tokens.cacheWrite.toLong()
+    val total = tokens.input +
+        tokens.output +
+        tokens.reasoning +
+        tokens.cacheRead +
+        tokens.cacheWrite
     Row(
         modifier = modifier.testTag("assistant_token_usage"),
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
