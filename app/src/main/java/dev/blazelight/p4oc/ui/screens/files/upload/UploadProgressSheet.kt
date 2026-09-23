@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,24 +57,21 @@ fun UploadProgressSheet(
         ) {
             Surface(color = theme.backgroundElement, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = stringResource(
-                        if (state.isActive) {
-                            R.string.upload_sheet_title
-                        } else {
-                            R.string.upload_sheet_done_title
-                        }
-                    ),
+                    text = stringResource(uploadTitleResource(state)),
                     style = MaterialTheme.typography.titleMedium,
                     color = theme.text,
                     modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
                 )
             }
-            contextLabel?.let {
-                Text(
-                    it,
-                    color = theme.textMuted,
-                    modifier = Modifier.padding(horizontal = Spacing.md),
-                )
+            if (state.failures.isNotEmpty()) {
+                contextLabel?.let {
+                    Text(
+                        it,
+                        color = theme.textMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = Spacing.md),
+                    )
+                }
             }
 
             if (state.isActive && state.current == null) {
@@ -121,16 +119,7 @@ fun UploadProgressSheet(
                     )
                 }
             } else if (!state.isActive) {
-                Text(
-                    text = stringResource(
-                        R.string.upload_sheet_summary,
-                        state.successes.size,
-                        state.failures.size,
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = theme.textMuted,
-                    modifier = Modifier.padding(horizontal = Spacing.md),
-                )
+                UploadSummary(state)
             }
 
             state.notice?.let { notice ->
@@ -172,6 +161,35 @@ fun UploadProgressSheet(
     }
 }
 
+private fun uploadTitleResource(state: UploadQueueState): Int = when {
+    state.isActive -> R.string.upload_sheet_title
+    state.failures.isNotEmpty() -> R.string.upload_sheet_failed_title
+    else -> R.string.upload_sheet_done_title
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun UploadSummary(state: UploadQueueState) {
+    Text(
+        text = if (state.failures.isEmpty()) {
+            pluralStringResource(
+                R.plurals.upload_sheet_success_summary,
+                state.successes.size,
+                state.successes.size,
+            )
+        } else {
+            stringResource(
+                R.string.upload_sheet_summary,
+                state.successes.size,
+                state.failures.size,
+            )
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        color = LocalOpenCodeTheme.current.textMuted,
+        modifier = Modifier.padding(horizontal = Spacing.md),
+    )
+}
+
 @Composable
 private fun UploadItemRow(item: UploadItem) {
     val theme = LocalOpenCodeTheme.current
@@ -183,50 +201,45 @@ private fun UploadItemRow(item: UploadItem) {
         is UploadPhase.Failed -> stringResource(R.string.upload_phase_failed) to theme.error
     }
     val probeFailure = item.probeFailure
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = Spacing.xxs),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Column(Modifier.fillMaxWidth().padding(vertical = Spacing.xs)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = getFileSymbol(item.displayName),
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                color = theme.textMuted,
+            )
+            Text(
+                text = if (probeFailure == null) {
+                    item.displayName
+                } else {
+                    stringResource(R.string.upload_probe_failed_for, item.displayName)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = theme.text,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.MiddleEllipsis,
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+            )
+        }
         Text(
-            text = getFileSymbol(item.displayName),
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-            color = theme.textMuted,
-        )
-        Text(
-            text = if (probeFailure == null) {
-                item.displayName
-            } else {
-                stringResource(R.string.upload_probe_failed_for, item.displayName)
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = theme.text,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = getMimeTypeLabel(item.mimeType),
+            text = "${getMimeTypeLabel(item.mimeType)} · " +
+                if (item.phase is UploadPhase.Uploading) {
+                    "${formatFileSize(item.bytesUploaded)}/${formatFileSize(item.bytesTotal)}"
+                } else {
+                    formatFileSize(item.bytesTotal)
+                },
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
             color = theme.textMuted,
-        )
-        Text(
-            text = if (item.phase is UploadPhase.Uploading) {
-                "${formatFileSize(item.bytesUploaded)}/${formatFileSize(item.bytesTotal)}"
-            } else {
-                formatFileSize(item.bytesTotal)
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = theme.textMuted,
-        )
-        Text(
-            text = "[$label]",
-            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-            color = color,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = Spacing.lg),
         )
     }
 }
