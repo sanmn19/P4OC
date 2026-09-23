@@ -5,13 +5,18 @@ import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.mime.FilenameMimeType
 import dev.blazelight.p4oc.core.network.ApiResult
 import dev.blazelight.p4oc.core.network.safeApiCall
+import dev.blazelight.p4oc.data.files.ofish.MAX_UPLOAD_SOURCE_BYTES
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.model.FileNode
 import dev.blazelight.p4oc.ui.components.chat.SelectedFile
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadCoordinator
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadQueueState
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadSource
+import dev.blazelight.p4oc.ui.screens.files.upload.UploadSourceMetadata
+import dev.blazelight.p4oc.ui.screens.files.upload.sanitizeUploadName
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +37,91 @@ class FilePickerManager(
         const val TAG = "FilePickerManager"
     }
 
+    val workspace = workspaceClient.workspace
+    private var pickerJob: Job? = null
+    private var reviewJob: Job? = null
+    private val _phoneReview = MutableStateFlow<PhoneAttachmentReview?>(null)
+    val phoneReview = _phoneReview.asStateFlow()
+
+    val hasUnresolvedUploads: Boolean
+        get() =
+            _phoneReview.value != null ||
+                uploadState.value.isActive ||
+                uploadState.value.failures.isNotEmpty()
+
+    fun reviewPhoneFiles(source: UploadSource, sourceIds: List<String>) {
+        if (sourceIds.isEmpty() ||
+            uploadState.value.isActive ||
+            uploadState.value.failures.isNotEmpty()
+        ) {
+            return
+        }
+        reviewJob?.cancel()
+        _phoneReview.value = PhoneAttachmentReview(isLoading = true)
+        loadPickerFiles()
+        reviewJob =
+            scope.launch {
+                val files =
+                    sourceIds.distinct().map { id ->
+                        try {
+                            val meta = source.probe(id)
+                            PhoneAttachment(
+                                sourceId = id,
+                                metadata =
+                                meta.copy(
+                                    displayName =
+                                    sanitizeUploadName(
+                                        meta.displayName,
+                                        System.currentTimeMillis(),
+                                    )
+                                ),
+                                issue =
+                                if (meta.sizeBytes > MAX_UPLOAD_SOURCE_BYTES) {
+                                    PhoneAttachmentIssue.TooLarge
+                                } else {
+                                    null
+                                },
+                            )
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            PhoneAttachment(
+                                id,
+                                UploadSourceMetadata(null, -1, null),
+                                PhoneAttachmentIssue.Unreadable,
+                            )
+                        }
+                    }
+                _phoneReview.value = PhoneAttachmentReview(files = files)
+            }
+    }
+
+    fun removePhoneFile(sourceId: String) {
+        _phoneReview.update { review ->
+            review?.copy(files = review.files.filterNot { it.sourceId == sourceId })
+        }
+    }
+
+    fun cancelPhoneReview() {
+        reviewJob?.cancel()
+        _phoneReview.value = null
+    }
+
+    fun confirmPhoneUpload(source: UploadSource) {
+        val review = _phoneReview.value ?: return
+        val destinationReady =
+            !_isPickerLoading.value && _pickerError.value == null && workspace.directory != null
+        val queueReady = !uploadState.value.isActive && uploadState.value.failures.isEmpty()
+        if (!review.canUpload || !destinationReady || !queueReady) return
+        val metadata = review.files.associate { it.sourceId to it.metadata }
+        val reviewedSource =
+            object : UploadSource by source {
+                override suspend fun probe(sourceId: String) = metadata.getValue(sourceId)
+            }
+        uploadAndAttach(reviewedSource, review.files.map { it.sourceId })
+        _phoneReview.value = null
+    }
+
     private val _pickerFiles = MutableStateFlow<List<FileNode>>(emptyList())
     val pickerFiles: StateFlow<List<FileNode>> = _pickerFiles.asStateFlow()
 
@@ -50,8 +140,9 @@ class FilePickerManager(
     val uploadState: StateFlow<UploadQueueState> = uploadCoordinator.state
 
     fun loadPickerFiles(path: String? = null) {
-        scope.launch {
-            _isPickerLoading.value = true
+        pickerJob?.cancel()
+        _isPickerLoading.value = true
+        pickerJob = scope.launch {
             val workspaceKey = uploadDirectoryWorkspaceKey()
             val rememberedPath = settingsDataStore.lastUploadDirectoriesByWorkspace.first()[workspaceKey]
             val effectivePath = path ?: rememberedPath?.ifBlank { null } ?: "."
@@ -140,22 +231,24 @@ class FilePickerManager(
             ?: false
     }
 
-    fun uploadAndAttach(source: UploadSource, sourceIds: List<String>) {
+    private fun uploadAndAttach(source: UploadSource, sourceIds: List<String>) {
         val currentPath = _pickerCurrentPath.value.ifBlank { null }
+        val deliveredPaths = mutableSetOf<String>()
         uploadCoordinator.upload(
             source = source,
             sourceIds = sourceIds,
             destinationPath = currentPath,
             onComplete = { uploadedFiles ->
-                if (uploadedFiles.isNotEmpty()) {
-                    loadPickerFiles(currentPath)
+                val newlyUploaded = uploadedFiles.filter { deliveredPaths.add(it.destinationPath) }
+                if (newlyUploaded.isNotEmpty()) {
                     _attachedFiles.update { current ->
-                        uploadedFiles.fold(current) { acc, item ->
+                        newlyUploaded.fold(current) { acc, item ->
                             if (acc.none { it.path == item.destinationPath }) {
                                 acc + SelectedFile(
                                     path = item.destinationPath,
                                     name = item.displayName,
                                     mimeType = item.mimeType,
+                                    sizeBytes = item.bytesTotal,
                                 )
                             } else {
                                 acc
@@ -189,4 +282,27 @@ class FilePickerManager(
             }
         }
     }
+}
+
+/**
+ * A pre-upload problem that blocks the reviewed batch. Display text is resolved
+ * at the Compose boundary so the message stays localized.
+ */
+enum class PhoneAttachmentIssue {
+    TooLarge,
+    Unreadable,
+}
+
+data class PhoneAttachment(
+    val sourceId: String,
+    val metadata: UploadSourceMetadata,
+    val issue: PhoneAttachmentIssue? = null,
+)
+
+data class PhoneAttachmentReview(
+    val files: List<PhoneAttachment> = emptyList(),
+    val isLoading: Boolean = false,
+) {
+    val canUpload: Boolean
+        get() = !isLoading && files.isNotEmpty() && files.none { it.issue != null }
 }

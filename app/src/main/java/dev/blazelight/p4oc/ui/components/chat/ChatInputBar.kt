@@ -3,9 +3,7 @@ package dev.blazelight.p4oc.ui.components.chat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
@@ -39,9 +37,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.Command
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
@@ -146,6 +142,8 @@ fun ChatInputBar(
     promptHistorySessionId: String? = null,
     enterToSend: Boolean = false,
     valueSyncGeneration: Long = 0,
+    workspaceDirectory: String? = null,
+    submissionBlocked: Boolean = false,
 ) {
     val theme = LocalOpenCodeTheme.current
     val focusRequester = remember { FocusRequester() }
@@ -190,7 +188,7 @@ fun ChatInputBar(
 
     // Determine button state
     val hasContent = currentText.isNotBlank() || attachedFiles.isNotEmpty()
-    val canSubmit = hasContent && enabled && !isLoading
+    val canSubmit = hasContent && enabled && !isLoading && !submissionBlocked
     val loadingDescription = stringResource(R.string.cd_loading)
     val sendDescription = stringResource(R.string.chat_action_send)
     val disconnectedDescription = stringResource(R.string.chat_disabled_disconnected)
@@ -198,10 +196,14 @@ fun ChatInputBar(
     val attachDescription = stringResource(R.string.chat_action_attach)
     val stopDescription = stringResource(R.string.chat_action_stop)
     val inputPlaceholder = stringResource(R.string.chat_input_placeholder)
+    val uploadsPendingDescription = stringResource(R.string.chat_disabled_uploads_pending)
+    // A blocked submission is not an empty draft: naming the real reason keeps the
+    // disabled Send button explainable, since its click handler never runs.
     val sendContentDescription = when {
         isLoading -> loadingDescription
         canSubmit -> sendDescription
         !enabled -> disconnectedDescription
+        submissionBlocked -> uploadsPendingDescription
         else -> emptyDescription
     }
     val resolvedCommands = rememberResolvedCommandMetadata(commands)
@@ -268,70 +270,7 @@ fun ChatInputBar(
         ) {
             Column {
                 if (attachedFiles.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = Spacing.lg, vertical = Spacing.xs),
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-                    ) {
-                        attachedFiles.forEach { file ->
-                            val chipColor = if (file.available) theme.accent else theme.warning
-                            val chipLabelColor = if (file.available) theme.text else theme.warning
-                            val removeDescription = stringResource(
-                                R.string.chat_action_remove_attachment,
-                                file.name,
-                            )
-                            Box(modifier = Modifier.height(48.dp)) {
-                                Surface(
-                                    shape = RectangleShape,
-                                    color = chipColor.copy(alpha = 0.1f),
-                                    modifier = Modifier
-                                        .align(Alignment.Center)
-                                        .height(Sizing.buttonHeightSm)
-                                        .border(Sizing.strokeMd, chipColor, RectangleShape)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(start = Spacing.mdLg),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                                    ) {
-                                        Text(
-                                            file.name,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = chipLabelColor,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.widthIn(max = Sizing.panelWidthMd)
-                                        )
-                                        if (!file.available) {
-                                            Text(
-                                                text = stringResource(R.string.attachment_unavailable),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = theme.warning,
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(Sizing.iconButtonMd))
-                                    }
-                                }
-                                IconButton(
-                                    onClick = { onRemoveAttachment(file.path) },
-                                    modifier = Modifier
-                                        .align(Alignment.CenterEnd)
-                                        .size(48.dp)
-                                        .semantics { contentDescription = removeDescription }
-                                ) {
-                                    Text(
-                                        text = "×",
-                                        color = theme.textMuted,
-                                        fontFamily = FontFamily.Monospace,
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    ComposerAttachmentRail(attachedFiles, workspaceDirectory, onRemoveAttachment)
                 }
 
                 Row(

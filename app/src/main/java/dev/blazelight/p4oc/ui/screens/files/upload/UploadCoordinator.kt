@@ -1,6 +1,7 @@
 package dev.blazelight.p4oc.ui.screens.files.upload
 
 import dev.blazelight.p4oc.data.files.FileRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -49,15 +50,17 @@ class UploadCoordinator(
         val currentCallbacks = UploadCallbacks(destinationPath, onComplete).also { callbacks = it }
 
         uploadJob?.cancel()
+        _state.value = UploadQueueState(isActive = true)
         uploadJob = scope.launch(Dispatchers.IO) {
             val mirrorJob = launch {
                 currentOrchestrator.state.collect {
-                    if (generation.get() == currentGeneration) _state.value = it
+                    if (generation.get() == currentGeneration) _state.value = it.copy(isActive = true)
                 }
             }
             try {
                 val plans = sourceIds.map { id ->
                     val metaResult = runCatching { source.probe(id) }
+                    (metaResult.exceptionOrNull() as? CancellationException)?.let { throw it }
                     val meta = metaResult.getOrNull()
                     UploadOrchestrator.Plan(
                         sourceId = id,
@@ -68,9 +71,10 @@ class UploadCoordinator(
                     )
                 }
                 val finalState = currentOrchestrator.run(currentCallbacks.destinationPath, plans)
+                mirrorJob.cancelAndJoin()
                 if (generation.get() == currentGeneration) {
-                    _state.value = finalState
                     currentCallbacks.onComplete(finalState.successes)
+                    _state.value = finalState
                 }
             } finally {
                 mirrorJob.cancel()
@@ -83,18 +87,20 @@ class UploadCoordinator(
         if (_state.value.failures.isEmpty() || _state.value.isActive) return
         val currentGeneration = generation.incrementAndGet()
         uploadJob?.cancel()
+        _state.value = _state.value.copy(isActive = true)
         uploadJob = scope.launch(Dispatchers.IO) {
             val mirrorJob = launch {
                 currentOrchestrator.state.collect {
-                    if (generation.get() == currentGeneration) _state.value = it
+                    if (generation.get() == currentGeneration) _state.value = it.copy(isActive = true)
                 }
             }
             try {
                 currentOrchestrator.retryFailed()
                 val finalState = currentOrchestrator.state.value
+                mirrorJob.cancelAndJoin()
                 if (generation.get() == currentGeneration) {
-                    _state.value = finalState
                     callbacks?.onComplete(finalState.successes)
+                    _state.value = finalState
                 }
             } finally {
                 mirrorJob.cancel()
@@ -103,14 +109,21 @@ class UploadCoordinator(
     }
 
     fun cancel() {
-        val currentJob = uploadJob ?: return
-        val currentOrchestrator = orchestrator ?: return
+        if (!_state.value.isActive) return
+        val currentJob = uploadJob
+        val currentOrchestrator = orchestrator
+        if (currentJob == null || currentOrchestrator == null) return
         generation.incrementAndGet()
         currentOrchestrator.markCancelled()
-        _state.value = currentOrchestrator.state.value
+        val completed = currentOrchestrator.state.value.successes
+        val completion = callbacks?.onComplete
+        val finalState = currentOrchestrator.state.value
+        _state.value = finalState.copy(isActive = true)
         uploadJob = null
         scope.launch {
             currentJob.cancelAndJoin()
+            completion?.invoke(completed)
+            _state.value = finalState
         }
     }
 

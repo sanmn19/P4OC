@@ -98,16 +98,6 @@ class ConnectionManager constructor(
     suspend fun connect(config: ServerConfig, password: String? = null): Result<List<ProjectDto>> {
         AppLog.d(TAG, "Connecting")
 
-        if (config.username != null && password != null &&
-            !ServerUrl.allowsCleartextCredentials(config.url)
-        ) {
-            return Result.failure(
-                IllegalArgumentException(
-                    "Credentials cannot be sent over HTTP outside a private local network",
-                ),
-            )
-        }
-
         disconnect()
         _connectionState.value = ConnectionState.Connecting
 

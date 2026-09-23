@@ -71,6 +71,7 @@ data class FileUploadRequest(
     val openStream: suspend () -> InputStream,
     val expectedHash: String? = null,
     val onBytesUploaded: (suspend (Long) -> Unit)? = null,
+    val createOnly: Boolean = false,
 )
 
 data class FileUploadResult(

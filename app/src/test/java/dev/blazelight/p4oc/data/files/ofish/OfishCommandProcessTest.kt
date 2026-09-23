@@ -265,7 +265,7 @@ class OfishCommandProcessTest {
         val bytes = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 
         val init = OfishMutationParser.parse(
-            builder.uploadInit("out/file.bin", null, capabilities).runIn(root),
+            builder.uploadInit("out/file.bin", null, capabilities, createOnly = true).runIn(root),
             "#OFISH_UPLOAD_INIT"
         )
         assertTrue(init is OfishMutationStatus.Ok)
@@ -280,12 +280,246 @@ class OfishCommandProcessTest {
         }
 
         val finish = OfishMutationParser.parse(
-            builder.uploadFinish("out/file.bin", token, null, capabilities).runIn(root),
+            builder.uploadFinish("out/file.bin", token, null, capabilities, createOnly = true).runIn(root),
             "#OFISH_UPLOAD_FINISH"
         )
 
         assertTrue(finish is OfishMutationStatus.Ok)
         assertArrayEquals(bytes, File(root, "out/file.bin").readBytes())
+    }
+
+    @Test
+    fun `create-only upload never replaces a file created during transfer`() {
+        assumeShellAvailable()
+        val root = temporaryFolder.newFolder()
+        val init = OfishMutationParser.parse(
+            builder.uploadInit("file.txt", null, capabilities, createOnly = true).runIn(root),
+            "#OFISH_UPLOAD_INIT"
+        ) as OfishMutationStatus.Ok
+        val token = requireNotNull(init.uploadToken)
+        builder.uploadChunk(token, "new".toByteArray(), capabilities).runIn(root)
+        val destination = File(root, "file.txt").apply { writeText("keep me") }
+
+        val finish = OfishMutationParser.parse(
+            builder.uploadFinish("file.txt", token, null, capabilities, createOnly = true).runIn(root),
+            "#OFISH_UPLOAD_FINISH"
+        )
+        assertTrue(finish is OfishMutationStatus.Conflict)
+        assertEquals("keep me", destination.readText())
+        val nextInit = OfishMutationParser.parse(
+            builder.uploadInit("file.txt", null, capabilities, createOnly = true).runIn(root),
+            "#OFISH_UPLOAD_INIT"
+        )
+        assertTrue(nextInit is OfishMutationStatus.Conflict)
+        builder.uploadAbort(token).runIn(root)
+        assertFalse(File(root, token).exists())
+    }
+
+    @Test
+    fun `create-only finish rejects directory without nesting the temp file`() {
+        assumeShellAvailable()
+        val root = temporaryFolder.newFolder()
+        val init = OfishMutationParser.parse(
+            builder.uploadInit("target", null, capabilities, createOnly = true).runIn(root),
+            "#OFISH_UPLOAD_INIT"
+        ) as OfishMutationStatus.Ok
+        val token = requireNotNull(init.uploadToken)
+        builder.uploadChunk(token, "new".toByteArray(), capabilities).runIn(root)
+        val target = File(root, "target").apply { mkdir() }
+
+        val finish = OfishMutationParser.parse(
+            builder.uploadFinish("target", token, null, capabilities, createOnly = true).runIn(root),
+            "#OFISH_UPLOAD_FINISH"
+        )
+
+        assertTrue(finish is OfishMutationStatus.Conflict)
+        assertTrue(target.isDirectory)
+        assertTrue(target.list()?.isEmpty() == true)
+        assertTrue(File(root, token).exists())
+        builder.uploadAbort(token).runIn(root)
+    }
+
+    @Test
+    fun `create-only finish cleans up nested link when a directory appears mid-finish`() {
+        assumeShellAvailable()
+        val root = temporaryFolder.newFolder()
+        val init = OfishMutationParser.parse(
+            builder.uploadInit("target", null, capabilities, createOnly = true).runIn(root),
+            "#OFISH_UPLOAD_INIT"
+        ) as OfishMutationStatus.Ok
+        val token = requireNotNull(init.uploadToken)
+        builder.uploadChunk(token, "new".toByteArray(), capabilities).runIn(root)
+        val tools = File(root, "tools").apply { mkdir() }
+        File(tools, "ln").apply {
+            writeText(
+                "#!/bin/sh\n" +
+                    "mkdir target\n" +
+                    "printf 'keep' > target/keep.txt\n" +
+                    "exec $realLn \"\$@\"\n"
+            )
+            setExecutable(true)
+        }
+
+        val finish = OfishMutationParser.parse(
+            runShell(
+                builder.uploadFinish("target", token, null, capabilities, createOnly = true),
+                root,
+                environment = mapOf("PATH" to "${tools.absolutePath}:${System.getenv("PATH")}"),
+            ),
+            "#OFISH_UPLOAD_FINISH"
+        )
+
+        assertTrue(finish is OfishMutationStatus.Conflict)
+        val target = File(root, "target")
+        assertTrue(target.isDirectory)
+        assertEquals(listOf("keep.txt"), target.list()?.toList())
+        assertEquals("keep", File(target, "keep.txt").readText())
+        assertTrue(File(root, token).exists())
+        builder.uploadAbort(token).runIn(root)
+    }
+
+    @Test
+    fun `create-only finish preserves a foreign file that replaced the nested link`() {
+        assumeShellAvailable()
+        val root = temporaryFolder.newFolder()
+        val init = OfishMutationParser.parse(
+            builder.uploadInit("target", null, capabilities, createOnly = true).runIn(root),
+            "#OFISH_UPLOAD_INIT"
+        ) as OfishMutationStatus.Ok
+        val token = requireNotNull(init.uploadToken)
+        builder.uploadChunk(token, "new".toByteArray(), capabilities).runIn(root)
+        val nestedName = File(token).name
+        val tools = File(root, "tools").apply { mkdir() }
+        File(tools, "ln").apply {
+            writeText(
+                "#!/bin/sh\n" +
+                    "mkdir target\n" +
+                    "$realLn \"\$@\"\n" +
+                    "rm -f 'target/$nestedName'\n" +
+                    "printf 'foreign' > 'target/$nestedName'\n"
+            )
+            setExecutable(true)
+        }
+
+        val finish = OfishMutationParser.parse(
+            runShell(
+                builder.uploadFinish("target", token, null, capabilities, createOnly = true),
+                root,
+                environment = mapOf("PATH" to "${tools.absolutePath}:${System.getenv("PATH")}"),
+            ),
+            "#OFISH_UPLOAD_FINISH"
+        )
+
+        assertTrue(finish is OfishMutationStatus.Conflict)
+        assertEquals("foreign", File(root, "target/$nestedName").readText())
+        assertTrue(File(root, token).exists())
+        builder.uploadAbort(token).runIn(root)
+    }
+
+    @Test
+    fun `create-only finish works with a strict POSIX ln`() {
+        assumeShellAvailable()
+        val root = temporaryFolder.newFolder()
+        val tools = File(root, "tools").apply { mkdir() }
+        File(tools, "ln").apply {
+            writeText(
+                "#!/bin/sh\n" +
+                    "for arg in \"\$@\"; do\n" +
+                    "  case \"\$arg\" in -*) exit 2;; esac\n" +
+                    "done\n" +
+                    "exec $realLn \"\$@\"\n"
+            )
+            setExecutable(true)
+        }
+        val environment = mapOf("PATH" to "${tools.absolutePath}:${System.getenv("PATH")}")
+        val init = OfishMutationParser.parse(
+            runShell(
+                builder.uploadInit("file.txt", null, capabilities, createOnly = true),
+                root,
+                environment = environment,
+            ),
+            "#OFISH_UPLOAD_INIT"
+        ) as OfishMutationStatus.Ok
+        val token = requireNotNull(init.uploadToken)
+        builder.uploadChunk(token, "new".toByteArray(), capabilities).runIn(root)
+
+        val finish = OfishMutationParser.parse(
+            runShell(
+                builder.uploadFinish("file.txt", token, null, capabilities, createOnly = true),
+                root,
+                environment = environment,
+            ),
+            "#OFISH_UPLOAD_FINISH"
+        )
+
+        assertTrue(finish is OfishMutationStatus.Ok)
+        assertEquals("new", File(root, "file.txt").readText())
+        assertFalse(File(root, token).exists())
+    }
+
+    @Test
+    fun `create-only upload writes a dash-leading name inside a dash-leading parent`() {
+        assumeShellAvailable()
+        val root = temporaryFolder.newFolder()
+        val init = OfishMutationParser.parse(
+            builder.uploadInit("-dash/-name.txt", null, capabilities, createOnly = true).runIn(root),
+            "#OFISH_UPLOAD_INIT"
+        ) as OfishMutationStatus.Ok
+        val token = requireNotNull(init.uploadToken)
+        builder.uploadChunk(token, "new".toByteArray(), capabilities).runIn(root)
+
+        val finish = OfishMutationParser.parse(
+            builder.uploadFinish("-dash/-name.txt", token, null, capabilities, createOnly = true).runIn(root),
+            "#OFISH_UPLOAD_FINISH",
+        )
+
+        assertTrue(finish.toString(), finish is OfishMutationStatus.Ok)
+        assertEquals("new", File(root, "-dash/-name.txt").readText())
+        assertFalse(File(root, token).exists())
+    }
+
+    @Test
+    fun `write handles dash-leading names and preserves executable mode`() {
+        assumeShellAvailable()
+        val root = temporaryFolder.newFolder()
+        val target = File(root, "-dash/-script.sh").apply {
+            parentFile?.mkdirs()
+            writeText("old")
+        }
+        Files.setPosixFilePermissions(target.toPath(), MODE_0755)
+
+        val output = builder.write("-dash/-script.sh", "new", null, capabilities).runIn(root)
+
+        assertTrue(output, OfishMutationParser.parse(output, "#OFISH_WRITE") is OfishMutationStatus.Ok)
+        assertEquals("new", target.readText())
+        assertEquals(MODE_0755, Files.getPosixFilePermissions(target.toPath()))
+    }
+
+    @Test
+    fun `chunked overwrite rejects a directory destination without nesting the spool file`() {
+        assumeShellAvailable()
+        val root = temporaryFolder.newFolder()
+        val init = OfishMutationParser.parse(
+            builder.uploadInit("target", null, capabilities).runIn(root),
+            "#OFISH_UPLOAD_INIT",
+        ) as OfishMutationStatus.Ok
+        val token = requireNotNull(init.uploadToken)
+        builder.uploadChunk(token, "new".toByteArray(), capabilities).runIn(root)
+        val target = File(root, "target").apply { mkdir() }
+        File(target, "keep.txt").writeText("keep")
+
+        val finish = OfishMutationParser.parse(
+            builder.uploadFinish("target", token, null, capabilities).runIn(root),
+            "#OFISH_UPLOAD_FINISH",
+        )
+
+        assertEquals(
+            OfishMutationStatus.PreconditionFailed("directory"),
+            finish,
+        )
+        assertEquals(listOf("keep.txt"), target.list()?.toList())
+        assertTrue(File(root, token).exists())
+        builder.uploadAbort(token).runIn(root)
     }
 
     @Test
@@ -387,6 +621,22 @@ class OfishCommandProcessTest {
             ?.let { file -> file.toPath().toAbsolutePath().normalize().toString() }
             ?: error("Could not resolve 'chmod' on the host PATH")
         require("'" !in resolved) { "Resolved chmod path must not contain shell metacharacters: $resolved" }
+        "'$resolved'"
+    }
+
+    /**
+     * Same PATH scan as [realChmod], for the `ln` wrapper scripts that plant a directory or
+     * reject option arguments before delegating to the real host `ln`.
+     */
+    private val realLn: String by lazy {
+        val resolved = System.getenv("PATH")
+            .orEmpty()
+            .split(File.pathSeparator)
+            .map { dir -> File(dir, "ln") }
+            .firstOrNull { it.isFile && it.canExecute() }
+            ?.let { file -> file.toPath().toAbsolutePath().normalize().toString() }
+            ?: error("Could not resolve 'ln' on the host PATH")
+        require("'" !in resolved) { "Resolved ln path must not contain shell metacharacters: $resolved" }
         "'$resolved'"
     }
 

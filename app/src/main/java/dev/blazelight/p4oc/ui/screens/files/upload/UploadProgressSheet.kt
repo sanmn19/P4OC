@@ -29,11 +29,14 @@ import dev.blazelight.p4oc.ui.theme.Spacing
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("FunctionNaming", "LongParameterList", "LongMethod")
 fun UploadProgressSheet(
     state: UploadQueueState,
     onCancel: () -> Unit,
     onDismiss: () -> Unit,
     onRetryFailed: () -> Unit,
+    onRemoveFailed: (() -> Unit)? = null,
+    contextLabel: String? = null,
 ) {
     val theme = LocalOpenCodeTheme.current
 
@@ -54,12 +57,32 @@ fun UploadProgressSheet(
             Surface(color = theme.backgroundElement, modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = stringResource(
-                        if (state.isActive) R.string.upload_sheet_title else R.string.upload_sheet_done_title
+                        if (state.isActive) {
+                            R.string.upload_sheet_title
+                        } else {
+                            R.string.upload_sheet_done_title
+                        }
                     ),
                     style = MaterialTheme.typography.titleMedium,
                     color = theme.text,
                     modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
                 )
+            }
+            contextLabel?.let {
+                Text(
+                    it,
+                    color = theme.textMuted,
+                    modifier = Modifier.padding(horizontal = Spacing.md),
+                )
+            }
+
+            if (state.isActive && state.current == null) {
+                Text(
+                    stringResource(R.string.upload_sheet_preparing),
+                    color = theme.textMuted,
+                    modifier = Modifier.padding(horizontal = Spacing.md),
+                )
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = theme.accent)
             }
 
             val current = state.current
@@ -80,23 +103,24 @@ fun UploadProgressSheet(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                LinearProgressIndicator(
-                    progress = {
-                        val totalFiles = state.total.coerceAtLeast(1)
-                        val itemProgress = if (current.bytesTotal > 0L) {
-                            current.bytesUploaded.toFloat() / current.bytesTotal
-                        } else {
-                            0f
-                        }
-                        ((state.currentIndex + itemProgress) / totalFiles).coerceIn(0f, 1f)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.md),
-                    color = theme.accent,
-                    trackColor = theme.backgroundElement,
-                )
-            } else {
+                if (current.bytesTotal > 0L) {
+                    LinearProgressIndicator(
+                        progress = {
+                            (current.bytesUploaded.toFloat() / current.bytesTotal).coerceIn(0f, 1f)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.md),
+                        color = theme.accent,
+                        trackColor = theme.backgroundElement,
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md),
+                        color = theme.accent,
+                    )
+                }
+            } else if (!state.isActive) {
                 Text(
                     text = stringResource(
                         R.string.upload_sheet_summary,
@@ -121,54 +145,29 @@ fun UploadProgressSheet(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .weight(1f, fill = false)
                     .padding(horizontal = Spacing.md),
                 verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
             ) {
                 items(state.items, key = { it.sourceId }) { item ->
                     UploadItemRow(item)
+                    (item.phase as? UploadPhase.Failed)?.let { failure ->
+                        Text(
+                            failure.message,
+                            color = theme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.md),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (state.isActive) {
-                    TextButton(
-                        onClick = onCancel,
-                        modifier = Modifier.testTag("upload_sheet_cancel"),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.upload_sheet_cancel),
-                            color = theme.text,
-                        )
-                    }
-                } else {
-                    if (state.failures.isNotEmpty()) {
-                        TextButton(
-                            onClick = onRetryFailed,
-                            modifier = Modifier.testTag("upload_sheet_retry"),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.upload_sheet_retry_failed),
-                                color = theme.warning,
-                            )
-                        }
-                    }
-                    TextButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.testTag("upload_sheet_dismiss"),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.upload_sheet_dismiss),
-                            color = theme.text,
-                        )
-                    }
-                }
-            }
+            UploadSheetActions(
+                state = state,
+                onCancel = onCancel,
+                onDismiss = onDismiss,
+                onRetryFailed = onRetryFailed,
+                onRemoveFailed = onRemoveFailed,
+            )
         }
     }
 }
@@ -229,5 +228,68 @@ private fun UploadItemRow(item: UploadItem) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun UploadSheetActions(
+    state: UploadQueueState,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit,
+    onRetryFailed: () -> Unit,
+    onRemoveFailed: (() -> Unit)?,
+) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.md),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm, Alignment.End),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (state.isActive) {
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier.testTag("upload_sheet_cancel"),
+            ) {
+                Text(
+                    text = stringResource(R.string.upload_sheet_cancel),
+                    color = theme.text,
+                )
+            }
+        } else {
+            if (state.failures.isNotEmpty()) {
+                onRemoveFailed?.let { remove ->
+                    TextButton(
+                        onClick = remove,
+                        modifier = Modifier.testTag("upload_remove_failed"),
+                    ) {
+                        Text(
+                            stringResource(R.string.upload_sheet_remove_failed),
+                            color = theme.textMuted,
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = onRetryFailed,
+                    modifier = Modifier.testTag("upload_sheet_retry"),
+                ) {
+                    Text(
+                        text = stringResource(R.string.upload_sheet_retry_failed),
+                        color = theme.warning,
+                    )
+                }
+            }
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("upload_sheet_dismiss"),
+            ) {
+                Text(
+                    text = stringResource(R.string.upload_sheet_dismiss),
+                    color = theme.text,
+                )
+            }
+        }
     }
 }

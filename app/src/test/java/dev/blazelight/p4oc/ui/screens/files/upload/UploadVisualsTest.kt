@@ -24,8 +24,8 @@ class UploadVisualsTest {
         assertEquals("2.0 GB", formatFileSize(2L * 1024L * 1024L * 1024L))
     }
 
-    @Test fun `formatFileSize negative coerced to zero`() {
-        assertEquals("0 B", formatFileSize(-5))
+    @Test fun `formatFileSize negative reports unknown`() {
+        assertEquals("Unknown size", formatFileSize(-5))
     }
 
     @Test fun `getFileSymbol maps known and unknown extensions`() {

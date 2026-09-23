@@ -32,6 +32,7 @@ import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.model.*
 import dev.blazelight.p4oc.domain.session.SessionId
 import dev.blazelight.p4oc.ui.components.chat.SelectedFile
+import dev.blazelight.p4oc.ui.components.chat.toOpenCodeFileUrl
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadCoordinator
 import kotlinx.coroutines.CancellationException
@@ -43,8 +44,6 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
-import java.io.File
-import java.net.URI
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
@@ -567,6 +566,10 @@ class ChatViewModel constructor(
         val input = _uiState.value.inputText
         val text = input.trim()
         val attachedFiles = filePickerManager.attachedFiles.value
+        attachmentError(attachedFiles)?.let { message ->
+            _uiState.update { it.copy(error = message) }
+            return false
+        }
         if (text.isEmpty() && attachedFiles.isEmpty()) return false
         if (attachedFiles.isEmpty() && text.startsWith("/")) {
             return sendSlashCommand(text, input)
@@ -603,6 +606,11 @@ class ChatViewModel constructor(
         attachedFiles: List<SelectedFile>,
         submission: ComposerSubmission?,
     ) {
+        attachmentError(attachedFiles)?.let { message ->
+            _uiState.update { it.copy(error = message, isSending = false) }
+            failComposerSubmission(submission)
+            return
+        }
         val knownMessageIds = messages.value.mapTo(mutableSetOf()) { it.message.id }
         val selectedAgent = modelAgentManager.selectedAgent.value
         val selectedModel = modelAgentManager.selectedModel.value
@@ -784,6 +792,32 @@ class ChatViewModel constructor(
         pendingComposerSubmission = null
     }
 
+    private fun attachmentError(files: List<SelectedFile>): String? {
+        if (files.isEmpty() && !filePickerManager.hasUnresolvedUploads) return null
+        val selected = modelAgentManager.selectedModel.value
+        val model =
+            modelAgentManager.availableModels.value
+                .firstOrNull { (provider, model) ->
+                    provider == selected?.providerID && model.id == selected?.modelID
+                }
+                ?.second
+        val unsupportedImage =
+            model?.capabilities?.input?.image == false &&
+                files.any {
+                    (it.mimeType ?: FilenameMimeType.resolveOrOctetStream(it.name)).startsWith("image/")
+                }
+        return when {
+            filePickerManager.hasUnresolvedUploads ->
+                "Finish reviewing uploads, or retry or remove failed uploads before sending."
+            files.isEmpty() -> null
+            workspaceClient.workspace.directory == null ->
+                "Open a project workspace before attaching files."
+            unsupportedImage ->
+                "This model does not accept images. Choose an image-capable model or remove the images."
+            else -> null
+        }
+    }
+
     private fun buildPartInputs(text: String, files: List<SelectedFile>): List<PartInputDto> {
         val parts = mutableListOf<PartInputDto>()
         if (text.isNotEmpty()) {
@@ -795,18 +829,11 @@ class ChatViewModel constructor(
                     type = "file",
                     filename = file.name,
                     mime = file.mimeType ?: FilenameMimeType.resolveOrOctetStream(file.name),
-                    url = file.toOpenCodeFileUrl()
+                    url = file.toOpenCodeFileUrl(requireNotNull(workspaceClient.workspace.directory))
                 )
             )
         }
         return parts
-    }
-
-    private fun SelectedFile.toOpenCodeFileUrl(): String {
-        val workspaceDirectory = workspaceClient.workspace.directory
-            ?: throw IllegalStateException("Cannot attach workspace file without a workspace directory")
-        val absolutePath = File(workspaceDirectory, path).normalize().path
-        return URI("file", null, absolutePath, null).toASCIIString()
     }
 
     // --- Permission / question responses ---

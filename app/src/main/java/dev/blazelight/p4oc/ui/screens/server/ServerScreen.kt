@@ -393,40 +393,8 @@ private fun remoteServerSection(
                 onTogglePassword = { passwordVisible = !passwordVisible },
             ),
         )
-        serverCleartextCredentialWarning(
-            url = state.url,
-            username = state.username,
-            password = state.password,
-        )
         connectButton(state = state, onConnect = actions.onConnect)
     }
-}
-
-/**
- * Pre-submit warning shown before CONNECT when a cleartext `http://` URL that the app considers a
- * trusted loopback or private-LAN address is combined with actual credentials (both username and
- * password present). Public-cleartext submissions are rejected outright, so this surfaces only the
- * allowed-but-unencrypted case. Shared by the connect-to-server and first-run setup forms so the
- * two cannot drift apart.
- */
-@Composable
-internal fun serverCleartextCredentialWarning(
-    url: String,
-    username: String,
-    password: String,
-    modifier: Modifier = Modifier,
-) {
-    val usesCleartext = url.trimStart().startsWith("http://", ignoreCase = true)
-    val hasCredentials = username.isNotBlank() && password.isNotBlank()
-    val shouldWarn = usesCleartext && hasCredentials && ServerUrl.allowsCleartextCredentials(url)
-    if (!shouldWarn) return
-    Text(
-        text = stringResource(R.string.server_cleartext_credentials_warning),
-        color = LocalOpenCodeTheme.current.warning,
-        style = MaterialTheme.typography.bodySmall,
-        fontFamily = FontFamily.Monospace,
-        modifier = modifier,
-    )
 }
 
 @Composable

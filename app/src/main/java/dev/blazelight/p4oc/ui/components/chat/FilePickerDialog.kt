@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
@@ -36,6 +35,8 @@ import dev.blazelight.p4oc.ui.theme.SemanticColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 import kotlinx.serialization.Serializable
+import java.io.File
+import java.net.URI
 
 @Serializable
 data class SelectedFile(
@@ -43,13 +44,21 @@ data class SelectedFile(
     val name: String,
     val mimeType: String? = null,
     val available: Boolean = true,
+    val sizeBytes: Long? = null,
 )
+
+fun SelectedFile.toOpenCodeFileUrl(workspaceDirectory: String): String {
+    val absolutePath = File(workspaceDirectory, path).normalize().path
+    return URI("file", null, absolutePath, null).toASCIIString()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("FunctionNaming", "LongParameterList", "LongMethod", "CyclomaticComplexMethod")
 fun FilePickerDialog(
     files: List<FileNode>,
     currentPath: String,
+    workspaceLabel: String,
     isLoading: Boolean,
     error: String?,
     selectedFiles: List<SelectedFile>,
@@ -57,9 +66,9 @@ fun FilePickerDialog(
     onNavigateUp: () -> Unit,
     onFileSelected: (FileNode) -> Unit,
     onFileDeselected: (String) -> Unit,
-    onUploadClick: () -> Unit,
+    choosingDirectory: Boolean = false,
     onConfirm: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val theme = LocalOpenCodeTheme.current
@@ -109,7 +118,11 @@ fun FilePickerDialog(
                                     .padding(end = Spacing.md)
                             )
                             Text(
-                                text = "[ ${stringResource(R.string.attach_files)} ]",
+                                text = if (choosingDirectory) {
+                                    stringResource(R.string.picker_upload_folder_title)
+                                } else {
+                                    "[ ${stringResource(R.string.attach_files)} ]"
+                                },
                                 style = MaterialTheme.typography.titleMedium,
                                 color = theme.text,
                                 fontFamily = FontFamily.Monospace,
@@ -121,7 +134,7 @@ fun FilePickerDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
-                            if (selectedFiles.isNotEmpty()) {
+                            if (!choosingDirectory && selectedFiles.isNotEmpty()) {
                                 Text(
                                     text = "[${selectedFiles.size}]",
                                     style = MaterialTheme.typography.labelMedium,
@@ -130,31 +143,33 @@ fun FilePickerDialog(
                                 )
                             }
                             Text(
-                                text = "[Upload]",
+                                text = if (choosingDirectory) {
+                                    stringResource(R.string.picker_use_folder)
+                                } else if (selectedFiles.isNotEmpty()) {
+                                    "[${stringResource(R.string.attach)}]"
+                                } else {
+                                    ""
+                                },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = theme.accent,
                                 fontFamily = FontFamily.Monospace,
-                                modifier = Modifier
-                                    .testTag("file_picker_upload")
-                                    .clickable(
-                                        role = Role.Button,
-                                        onClick = onUploadClick,
-                                    )
-                            )
-                            Text(
-                                text = if (selectedFiles.isNotEmpty()) "[${stringResource(R.string.attach)}]" else "",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (selectedFiles.isNotEmpty()) theme.accent else theme.textMuted,
-                                fontFamily = FontFamily.Monospace,
                                 modifier = Modifier.clickable(
-                                    enabled = selectedFiles.isNotEmpty(),
+                                    enabled = !isLoading &&
+                                        error == null &&
+                                        (choosingDirectory || selectedFiles.isNotEmpty()),
                                     role = Role.Button,
-                                    onClick = onConfirm
+                                    onClick = onConfirm,
                                 )
                             )
                         }
                     }
                 }
+                Text(
+                    text = workspaceLabel,
+                    color = theme.textMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(Spacing.md),
+                )
 
                 OutlinedTextField(
                     value = searchQuery,
@@ -205,7 +220,7 @@ fun FilePickerDialog(
                     )
                 }
 
-                if (selectedFiles.isNotEmpty()) {
+                if (!choosingDirectory && selectedFiles.isNotEmpty()) {
                     SelectedFilesChips(
                         selectedFiles = selectedFiles,
                         onRemove = onFileDeselected

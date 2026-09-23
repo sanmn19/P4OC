@@ -112,7 +112,7 @@ Replace `ssh box` and paths with the actual test server details.
     Expected: A tab still works; session list/chat/files render; live updates still work; no crash occurs.
 
 17. Existing file attachment.
-    Action: In `p4oc-A` chat, tap attach, open Attach Files dialog, select `sample.kt`, and tap `[Attach]`.
+    Action: In `p4oc-A` chat, tap attach, choose `Workspace files` in the source sheet, select `sample.kt` in the picker, and tap `[Attach]`.
     Expected: Attachment chip/row appears in composer, and the remove control removes it.
 
 18. Attachment server handoff.
@@ -143,9 +143,9 @@ Replace `ssh box` and paths with the actual test server details.
     Action: Disable Wi-Fi, start an upload, wait for failure, re-enable Wi-Fi, and tap Retry failed.
     Expected: Only failed items retry, successful items are not duplicated, and final sheet shows success.
 
-24. Chat picker `[Upload]` flow.
-    Action: In chat attach dialog, tap `[Upload]` and pick a local file from the Android picker.
-    Expected: Upload sheet completes, the file is auto-selected/attached, and tapping `[Attach]` leaves a chip in the composer.
+24. Chat phone upload review flow.
+    Action: In chat, tap attach, choose `Files from phone`, and pick a local file in the Android picker.
+    Expected: Review sheet shows file metadata and the workspace destination; `Upload & attach` runs the upload sheet, and the file lands as a chip in the composer without sending a message.
 
 25. Uploaded chat attachment readable.
     Action: Upload/attach a local text file through the chat picker and send `Read the attached file and reply with the first line.`
