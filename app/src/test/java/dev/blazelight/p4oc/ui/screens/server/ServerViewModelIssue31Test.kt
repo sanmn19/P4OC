@@ -28,7 +28,6 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -131,7 +130,7 @@ class ServerViewModelIssue31Test {
     }
 
     @Test
-    fun `public http with credentials is rejected before connection`() = runTest(dispatcher) {
+    fun `credentialed HTTP tailnet host reaches connection attempt`() = runTest(dispatcher) {
         val settingsDataStore = mockk<SettingsDataStore>()
         val connectionRegistry = mockk<ServerConnectionRegistry>()
         val discoveryManager = mockk<MdnsDiscoveryManager>()
@@ -141,6 +140,8 @@ class ServerViewModelIssue31Test {
         coEvery { settingsDataStore.getLastConnection() } returns null
         every { discoveryManager.discoveredServers } returns MutableStateFlow(emptyList())
         every { discoveryManager.discoveryState } returns MutableStateFlow(DiscoveryState.IDLE)
+        coEvery { connectionRegistry.connectAndAwait(any(), any()) } returns
+            Result.failure(IllegalStateException("offline"))
 
         val viewModel = ServerViewModel(
             settingsDataStore = settingsDataStore,
@@ -150,14 +151,18 @@ class ServerViewModelIssue31Test {
         )
         advanceUntilIdle()
 
-        viewModel.setRemoteUrl("http://example.com:4096")
+        viewModel.setRemoteUrl("http://device.tailnet.ts.net:4096")
         viewModel.setPassword("secret")
         viewModel.connectToRemote()
         advanceUntilIdle()
 
-        coVerify(exactly = 0) { connectionRegistry.connectAndAwait(any(), any()) }
-        assertFalse(viewModel.uiState.value.isConnecting)
-        assertTrue(viewModel.uiState.value.error.orEmpty().contains("HTTPS"))
+        coVerify(exactly = 1) {
+            connectionRegistry.connectAndAwait(
+                match { it.endpoint == "http://device.tailnet.ts.net:4096" },
+                "secret",
+            )
+        }
+        assertFalse(viewModel.uiState.value.isConnected)
     }
 
     @Test

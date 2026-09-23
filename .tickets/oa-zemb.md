@@ -1,6 +1,6 @@
 ---
 id: oa-zemb
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-07-09T00:00:00Z
@@ -72,3 +72,7 @@ Open-tab confirmation copy should explain the consequence, for example:
 **2026-07-10T07:39:56Z**
 
 Implementation and integrated compile/detekt/tests pass. Current-device server inventory screenshots verify the inline destructive label is gone, but the required open-tab overflow -> Forget server -> confirmation-dialog screenshot was not captured. Ticket remains in progress per its explicit verification gate.
+
+**2026-09-23T09:39:40Z**
+
+2026-09-23: On Samsung R58X70XHB9P in isolated build dev.blazelight.p4oc.reviewproof connected to OpenCode 1.18.31, opened a session tab for saved server 127.0.0.1:14097, then captured saved-server overflow (.crabbox/captures/release-review/13-overflow-open-tab.png) and Forget server confirmation with 1 open tab and explicit Review tabs / Close tabs and forget choices (.crabbox/captures/release-review/14-forget-open-tab-confirmation.png). Back dismissed without removal; saved server remains (.crabbox/captures/release-review/15-server-preserved-open-tab.png). The required screenshot gate is satisfied. No destructive action was taken.

@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!--
-      OpenCode commonly runs without TLS on LAN addresses. Android's network-security-config
-      cannot express IP CIDR ranges, so credential-bearing HTTP is restricted to literal
-      loopback/private addresses by ServerUrl and ConnectionManager instead.
-    -->
+    <!-- OpenCode commonly runs over HTTP, including on user-managed private networks. -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />

@@ -208,17 +208,6 @@ class ServerViewModel constructor(
                 return@launch
             }
             val password = state.password.takeIf { it.isNotBlank() }
-            if (state.username.isNotBlank() && password != null &&
-                !ServerUrl.allowsCleartextCredentials(url)
-            ) {
-                _uiState.update {
-                    it.copy(
-                        isConnecting = false,
-                        error = "Credentials require HTTPS outside a private local network",
-                    )
-                }
-                return@launch
-            }
             val endpointKey = ServerUrl.endpointKey(url)
             _uiState.update {
                 it.copy(

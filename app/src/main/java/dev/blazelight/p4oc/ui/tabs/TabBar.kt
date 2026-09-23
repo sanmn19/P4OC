@@ -280,24 +280,30 @@ private fun tabIndicatorRow(
             modifier = Modifier.widthIn(max = Sizing.panelWidthSm),
         )
         if (state.closeable) {
-            // Own click target: closes without ever selecting the tab underneath.
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .clickable(role = Role.Button, onClick = state.onClose)
-                    .padding(horizontal = Spacing.sm)
-                    .semantics { contentDescription = closeLabel }
-                    .testTag("work_tab_${state.id}_close"),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = null,
-                    modifier = Modifier.size(Sizing.iconXs),
-                    tint = if (state.isActive) theme.text else theme.textMuted,
-                )
-            }
+            tabCloseTarget(state, closeLabel)
         }
+    }
+}
+
+@Composable
+private fun tabCloseTarget(state: TabIndicatorState, closeLabel: String) {
+    val theme = LocalOpenCodeTheme.current
+    // Own click target: closes without ever selecting the tab underneath.
+    Box(
+        modifier = Modifier
+            .fillMaxHeight()
+            .clickable(role = Role.Button, onClick = state.onClose)
+            .padding(horizontal = Spacing.sm)
+            .semantics { contentDescription = closeLabel }
+            .testTag("work_tab_${state.id}_close"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Close,
+            contentDescription = null,
+            modifier = Modifier.size(Sizing.iconXs),
+            tint = if (state.isActive) theme.text else theme.textMuted,
+        )
     }
 }
 

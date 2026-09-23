@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -79,6 +80,7 @@ fun ChatAttachmentList(
 fun ChatAttachment(
     part: Part.File,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val theme = LocalOpenCodeTheme.current
     val filename = part.filename?.takeIf { it.isNotBlank() }
@@ -99,9 +101,9 @@ fun ChatAttachment(
             modifier = Modifier.padding(Spacing.sm),
             verticalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
-            AttachmentMetadata(filename = filename, mimeType = mimeType)
+            if (!compact) AttachmentMetadata(filename = filename, mimeType = mimeType)
             if (isImage) {
-                ChatImageAttachment(part = part, filename = filename)
+                ChatImageAttachment(part = part, filename = filename, compact = compact)
             }
         }
     }
@@ -133,8 +135,9 @@ private fun AttachmentMetadata(filename: String, mimeType: String) {
 
 @Composable
 @Suppress("FunctionNaming")
-private fun ChatImageAttachment(part: Part.File, filename: String) {
+private fun ChatImageAttachment(part: Part.File, filename: String, compact: Boolean) {
     val loader = LocalChatMediaLoader.current
+    val loadingDescription = stringResource(R.string.chat_attachment_loading_preview)
     val loadState = remember(loader, part) {
         mutableStateOf<ChatMediaLoadResult?>(null)
     }
@@ -150,12 +153,34 @@ private fun ChatImageAttachment(part: Part.File, filename: String) {
     }
 
     when (val result = loadState.value) {
-        null -> AttachmentLoading(filename = filename)
-        ChatMediaLoadResult.Unavailable -> AttachmentUnavailable(partId = part.id)
+        null ->
+            if (compact) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .size(Sizing.iconMd)
+                        .semantics {
+                            contentDescription = loadingDescription
+                        },
+                    color = LocalOpenCodeTheme.current.accent,
+                )
+            } else {
+                AttachmentLoading(filename = filename)
+            }
+        ChatMediaLoadResult.Unavailable ->
+            if (compact) {
+                Text(
+                    stringResource(R.string.chat_attachment_no_preview),
+                    color = LocalOpenCodeTheme.current.textMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            } else {
+                AttachmentUnavailable(partId = part.id)
+            }
         is ChatMediaLoadResult.Loaded -> LoadedImagePreview(
             part = part,
             filename = filename,
             loaded = result,
+            compact = compact,
         )
     }
 }
@@ -196,6 +221,7 @@ private fun LoadedImagePreview(
     part: Part.File,
     filename: String,
     loaded: ChatMediaLoadResult.Loaded,
+    compact: Boolean,
 ) {
     var imageDecoded by remember(part, loaded) { mutableStateOf(false) }
     var imageDecodeFailed by remember(part, loaded) { mutableStateOf(false) }
@@ -203,16 +229,18 @@ private fun LoadedImagePreview(
     val imageDescription = stringResource(R.string.chat_attachment_image_description, filename)
     val openDescription = stringResource(R.string.chat_attachment_open_image, filename)
 
+    val maxHeight = if (compact) {
+        Sizing.listItemHeightLg
+    } else {
+        Sizing.chatAttachmentPreviewMaxHeight
+    }
     if (imageDecodeFailed) {
         AttachmentUnavailable(partId = part.id)
     } else {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(
-                    min = Sizing.listItemHeightLg,
-                    max = Sizing.chatAttachmentPreviewMaxHeight,
-                ),
+                .heightIn(min = Sizing.listItemHeightLg, max = maxHeight),
             contentAlignment = Alignment.Center,
         ) {
             AsyncImage(
@@ -221,16 +249,8 @@ private fun LoadedImagePreview(
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = Sizing.chatAttachmentPreviewMaxHeight)
-                    .then(
-                        if (imageDecoded) {
-                            Modifier
-                                .testTag("chat_attachment_image_${part.id}")
-                                .clickable(role = Role.Button) { showFullscreen = true }
-                        } else {
-                            Modifier
-                        }
-                    ),
+                    .heightIn(max = maxHeight)
+                    .openImageWhenDecoded(imageDecoded, part.id) { showFullscreen = true },
                 onSuccess = {
                     imageDecoded = true
                     imageDecodeFailed = false
@@ -254,6 +274,16 @@ private fun LoadedImagePreview(
             onDismiss = { showFullscreen = false },
         )
     }
+}
+
+private fun Modifier.openImageWhenDecoded(
+    imageDecoded: Boolean,
+    partId: String,
+    onOpen: () -> Unit,
+): Modifier = if (imageDecoded) {
+    testTag("chat_attachment_image_$partId").clickable(role = Role.Button) { onOpen() }
+} else {
+    this
 }
 
 @Composable

@@ -57,7 +57,7 @@ class UploadOrchestrator(
                 displayName = sanitized,
                 destinationPath = joinDestinationPath(currentPath, sanitized),
                 mimeType = plan.mimeType ?: DEFAULT_MIME,
-                bytesTotal = plan.sizeBytes.coerceAtLeast(0L),
+                bytesTotal = plan.sizeBytes,
                 probeFailure = plan.probeFailure,
             )
         }
@@ -109,7 +109,7 @@ class UploadOrchestrator(
 
     /**
      * Mark the queue cancelled and convert any in-flight item (Reading /
-     * Uploading / Pending) into a terminal Failed("cancelled") so the UI
+     * Uploading / Pending) into a terminal Failed(CANCELLED_MESSAGE) so the UI
      * doesn't keep displaying it as active forever after the job is killed.
      */
     fun markCancelled() {
@@ -145,45 +145,51 @@ class UploadOrchestrator(
                     bytesUploaded = 0L,
                 )
             }
-            val request = FileUploadRequest(
-                path = item.destinationPath,
-                contentLength = item.bytesTotal,
-                openStream = { source.openStream(item.sourceId) },
-                expectedHash = null,
-                onBytesUploaded = { uploaded ->
-                    updateItem(index, generation) { current ->
-                        val total = if (current.bytesTotal > 0L) current.bytesTotal else uploaded
-                        current.copy(
-                            bytesTotal = total,
-                            bytesUploaded = if (total > 0L) uploaded.coerceIn(0L, total) else uploaded,
-                        )
-                    }
-                },
-            )
+            val request = uploadRequest(item, index, generation)
             when (val result = fileRepository.uploadFile(request)) {
                 is FileOperationResult.Ok -> {
                     if (operationGeneration.get() != generation) return
-                    updateItem(index, generation) { it.copy(phase = UploadPhase.Done, bytesUploaded = it.bytesTotal) }
+                    updateItem(index, generation) {
+                        val total = if (it.bytesTotal < 0) it.bytesUploaded else it.bytesTotal
+                        it.copy(phase = UploadPhase.Done, bytesTotal = total, bytesUploaded = total)
+                    }
                     return
                 }
                 is FileOperationResult.Conflict -> {
                     if (operationGeneration.get() != generation) return
                     updateItem(index, generation) {
-                        it.copy(phase = UploadPhase.Failed(result.message))
+                        it.copy(phase = UploadPhase.Failed(CONFLICT_MESSAGE))
                     }
                     return
                 }
                 is FileOperationResult.Failed -> {
                     if (operationGeneration.get() != generation) return
-                    lastFailure = result.message
+                    lastFailure = if (result.message == UPLOAD_TOO_LARGE_MESSAGE) {
+                        UPLOAD_TOO_LARGE_MESSAGE
+                    } else {
+                        FAILURE_MESSAGE
+                    }
                     if (attempt < maxAttempts) delay(retryDelayMillis(attempt))
                 }
             }
         }
         updateItem(index, generation) {
-            it.copy(phase = UploadPhase.Failed(lastFailure ?: "Upload failed"))
+            it.copy(phase = UploadPhase.Failed(lastFailure ?: FAILURE_MESSAGE))
         }
     }
+
+    private fun uploadRequest(item: UploadItem, index: Int, generation: Long) = FileUploadRequest(
+        path = item.destinationPath,
+        contentLength = item.bytesTotal,
+        openStream = { source.openStream(item.sourceId) },
+        expectedHash = null,
+        createOnly = true,
+        onBytesUploaded = { uploaded ->
+            updateItem(index, generation) { current ->
+                current.copy(phase = UploadPhase.Uploading, bytesUploaded = uploaded)
+            }
+        },
+    )
 
     private fun updateItem(index: Int, generation: Long, transform: (UploadItem) -> UploadItem) {
         _state.update { state ->
@@ -203,7 +209,14 @@ class UploadOrchestrator(
         const val DEFAULT_MAX_ATTEMPTS = 3
 
         const val DEFAULT_MIME = "application/octet-stream"
-        const val CANCELLED_MESSAGE = "cancelled"
+        const val CANCELLED_MESSAGE =
+            "Upload cancelled. Retry or remove this entry; completed workspace files were kept."
+        private const val CONFLICT_MESSAGE =
+            "A file with this name already exists, or this folder cannot accept a new file. " +
+                "Choose another folder; existing files were not replaced."
+        private const val FAILURE_MESSAGE =
+            "Could not upload this file. Check the connection and folder permissions, then retry. " +
+                "If the phone file is no longer accessible, remove it and choose it again."
 
         private fun defaultBackoff(attempt: Int): Long = when (attempt) {
             1 -> 200L

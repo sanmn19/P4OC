@@ -2,8 +2,10 @@
 
 package dev.blazelight.p4oc.ui.screens.chat
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -39,17 +41,21 @@ import dev.blazelight.p4oc.domain.model.Part
 import dev.blazelight.p4oc.domain.model.Permission
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
 import dev.blazelight.p4oc.domain.model.SessionPresence
+import dev.blazelight.p4oc.ui.components.TuiAlertDialog
+import dev.blazelight.p4oc.ui.components.TuiButton
 import dev.blazelight.p4oc.ui.components.TuiConfirmDialog
 import dev.blazelight.p4oc.ui.components.TuiDropdownMenuItem
 import dev.blazelight.p4oc.ui.components.TuiLoadingScreen
 import dev.blazelight.p4oc.ui.components.TuiSnackbar
 import dev.blazelight.p4oc.ui.components.TuiTopBar
+import dev.blazelight.p4oc.ui.components.chat.AttachmentSourceSheet
 import dev.blazelight.p4oc.ui.components.chat.ChatInputBar
 import dev.blazelight.p4oc.ui.components.chat.ChatJumpNavigationButtons
 import dev.blazelight.p4oc.ui.components.chat.FilePickerDialog
 import dev.blazelight.p4oc.ui.components.chat.InlinePermissionPrompt
 import dev.blazelight.p4oc.ui.components.chat.LocalChatMediaLoader
 import dev.blazelight.p4oc.ui.components.chat.ModelAgentSelectorBar
+import dev.blazelight.p4oc.ui.components.chat.PhoneAttachmentSheet
 import dev.blazelight.p4oc.ui.components.command.CommandPalette
 import dev.blazelight.p4oc.ui.components.command.rememberResolvedCommandMetadata
 import dev.blazelight.p4oc.ui.components.question.InlineQuestionCard
@@ -107,6 +113,16 @@ internal fun hasChatContent(
     hasPendingQuestion: Boolean,
     hasSessionPendingPermissions: Boolean,
 ): Boolean = hasMessages || isBusy || hasPendingQuestion || hasSessionPendingPermissions
+
+/**
+ * Identity of the workspace an external phone picker was launched against. Deliberately
+ * excludes the session id: it is null until the session loads, so including it made a
+ * process-restored picker result compare against a different key and report a bogus
+ * "workspace changed". The per-screen activity-result registration already binds the
+ * result to the chat that launched it; only the server/workspace can really drift.
+ */
+internal fun attachmentOwnerKey(serverEndpointKey: String, workspaceDirectory: String?): String =
+    "$serverEndpointKey|${workspaceDirectory.orEmpty()}"
 
 internal enum class ChatLoadingOverlay {
     None,
@@ -175,16 +191,40 @@ fun ChatScreen(
     val isPickerLoading by viewModel.filePickerManager.isPickerLoading.collectAsStateWithLifecycle()
     val pickerError by viewModel.filePickerManager.pickerError.collectAsStateWithLifecycle()
     val uploadState by viewModel.filePickerManager.uploadState.collectAsStateWithLifecycle()
+    val phoneReview by viewModel.filePickerManager.phoneReview.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val uploadSource = remember(context) {
         ContentResolverUploadSource(context.applicationContext.contentResolver)
     }
+    val attachmentWorkspace = viewModel.filePickerManager.workspace
+    val attachmentOwner = attachmentOwnerKey(
+        attachmentWorkspace.server.endpointKey,
+        attachmentWorkspace.directory,
+    )
+    var launchedAttachmentOwner by rememberSaveable { mutableStateOf<String?>(null) }
+    var attachmentOwnerError by remember { mutableStateOf(false) }
+    val acceptPhoneSelection: (List<Uri>) -> Unit = { uris ->
+        if (uris.isNotEmpty()) {
+            if (launchedAttachmentOwner == attachmentOwner) {
+                viewModel.filePickerManager.reviewPhoneFiles(
+                    uploadSource,
+                    uris.map { it.toString() },
+                )
+            } else {
+                attachmentOwnerError = true
+            }
+        }
+        launchedAttachmentOwner = null
+    }
     val uploadLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
-        if (!uris.isNullOrEmpty()) {
-            viewModel.filePickerManager.uploadAndAttach(uploadSource, uris.map { it.toString() })
-        }
+        acceptPhoneSelection(uris)
+    }
+    val photosLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris ->
+        acceptPhoneSelection(uris)
     }
 
     // Notify parent when session is loaded
@@ -221,7 +261,24 @@ fun ChatScreen(
     var showCommandPalette by remember { mutableStateOf(false) }
     var showTodoTracker by remember { mutableStateOf(false) }
     var showFilePicker by remember { mutableStateOf(false) }
+    var showAttachmentSources by remember { mutableStateOf(false) }
+    var choosingUploadFolder by remember { mutableStateOf(false) }
+    var showUploads by remember { mutableStateOf(true) }
     var showRevertDialog by remember { mutableStateOf<String?>(null) }
+    if (attachmentOwnerError) {
+        TuiAlertDialog(
+            onDismissRequest = { attachmentOwnerError = false },
+            title = stringResource(R.string.chat_attachment_workspace_changed_title),
+            modifier = Modifier.testTag("chat_attachment_workspace_changed"),
+            confirmButton = {
+                TuiButton(onClick = { attachmentOwnerError = false }) {
+                    Text(stringResource(android.R.string.ok))
+                }
+            },
+        ) {
+            Text(stringResource(R.string.chat_attachment_workspace_changed_message))
+        }
+    }
 
     val scrollRestorationState = rememberSaveable(
         uiState.session?.id,
@@ -446,38 +503,61 @@ fun ChatScreen(
                         },
                         providerNames = providerNames,
                     )
-                    ChatInputBar(
-                        value = uiState.inputText,
-                        valueSyncGeneration = uiState.inputSyncGeneration,
-                        onValueChange = { text ->
-                            viewModel.updateInput(text)
-                            if (text.startsWith("/") && !text.contains(" ")) {
-                                viewModel.refreshCommandsIfNeeded()
-                            }
-                        },
-                        onSend = { viewModel.sendMessage() },
-                        isLoading = uiState.isSending,
-                        enabled = connectionState is ConnectionState.Connected,
-                        isBusy = uiState.isBusy,
-                        onAbort = viewModel::abortSession,
-                        attachedFiles = attachedFiles,
-                        onAttachClick = {
-                            viewModel.filePickerManager.loadPickerFiles()
-                            showFilePicker = true
-                        },
-                        onRemoveAttachment = viewModel.filePickerManager::detachFile,
-                        commands = uiState.commands,
-                        isLoadingCommands = uiState.isLoadingCommands,
-                        commandLoadError = uiState.commandLoadError,
-                        onRetryCommands = { viewModel.refreshCommandsIfNeeded(force = true) },
-                        onCommandSelected = { /* Command text is already updated via onValueChange */ },
-                        requestFocus = requestInitialInputFocus,
-                        isActiveTab = isActiveTab,
-                        onComposerFocusChanged = { composerFocused = it },
-                        promptHistory = promptHistory,
-                        promptHistorySessionId = uiState.session?.id,
-                        enterToSend = chatSettings.enterToSend,
-                    )
+                    if (uploadState.isActive || uploadState.failures.isNotEmpty()) {
+                        val theme = LocalOpenCodeTheme.current
+                        TextButton(
+                            onClick = { showUploads = true },
+                            modifier = Modifier.testTag("review_pending_uploads"),
+                        ) {
+                            Text(
+                                if (uploadState.isActive) {
+                                    stringResource(R.string.chat_upload_active_review)
+                                } else {
+                                    stringResource(R.string.chat_upload_attention_review)
+                                },
+                                color = if (uploadState.isActive) theme.accent else theme.warning,
+                            )
+                        }
+                    }
+                    CompositionLocalProvider(LocalChatMediaLoader provides viewModel.mediaLoader) {
+                        ChatInputBar(
+                            value = uiState.inputText,
+                            valueSyncGeneration = uiState.inputSyncGeneration,
+                            onValueChange = { text ->
+                                viewModel.updateInput(text)
+                                if (text.startsWith("/") && !text.contains(" ")) {
+                                    viewModel.refreshCommandsIfNeeded()
+                                }
+                            },
+                            onSend = { viewModel.sendMessage() },
+                            isLoading = uiState.isSending,
+                            enabled = connectionState is ConnectionState.Connected,
+                            isBusy = uiState.isBusy,
+                            onAbort = viewModel::abortSession,
+                            attachedFiles = attachedFiles,
+                            workspaceDirectory = viewModel.filePickerManager.workspace.directory,
+                            submissionBlocked = viewModel.filePickerManager.hasUnresolvedUploads,
+                            onAttachClick = {
+                                if (uploadState.isActive || uploadState.failures.isNotEmpty()) {
+                                    showUploads = true
+                                } else {
+                                    showAttachmentSources = true
+                                }
+                            },
+                            onRemoveAttachment = viewModel.filePickerManager::detachFile,
+                            commands = uiState.commands,
+                            isLoadingCommands = uiState.isLoadingCommands,
+                            commandLoadError = uiState.commandLoadError,
+                            onRetryCommands = { viewModel.refreshCommandsIfNeeded(force = true) },
+                            onCommandSelected = { /* Command text is already updated via onValueChange */ },
+                            requestFocus = requestInitialInputFocus,
+                            isActiveTab = isActiveTab,
+                            onComposerFocusChanged = { composerFocused = it },
+                            promptHistory = promptHistory,
+                            promptHistorySessionId = uiState.session?.id,
+                            enterToSend = chatSettings.enterToSend,
+                        )
+                    }
                 }
             }
         }
@@ -739,14 +819,70 @@ fun ChatScreen(
         )
     }
 
+    if (showAttachmentSources) {
+        AttachmentSourceSheet(
+            onPhotos = {
+                launchedAttachmentOwner = attachmentOwner
+                showAttachmentSources = false
+                photosLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
+            onPhoneFiles = {
+                launchedAttachmentOwner = attachmentOwner
+                showAttachmentSources = false
+                uploadLauncher.launch(arrayOf("*/*"))
+            },
+            onWorkspace = {
+                showAttachmentSources = false
+                viewModel.filePickerManager.loadPickerFiles()
+                showFilePicker = true
+            },
+            onDismiss = { showAttachmentSources = false },
+        )
+    }
+    phoneReview
+        ?.takeUnless { choosingUploadFolder }
+        ?.let { review ->
+            val workspace = viewModel.filePickerManager.workspace
+            PhoneAttachmentSheet(
+                review = review,
+                destination =
+                    "${workspace.server.displayName}\n" +
+                        "${workspace.directory.orEmpty().trimEnd('/')}/${pickerCurrentPath.trim('/')}",
+                destinationError =
+                    if (workspace.directory == null) {
+                        stringResource(R.string.attach_review_workspace_required)
+                    } else {
+                        pickerError
+                    },
+                loadingDestination = isPickerLoading,
+                onChangeFolder = {
+                    choosingUploadFolder = true
+                    showFilePicker = true
+                },
+                onRemove = viewModel.filePickerManager::removePhoneFile,
+                onUpload = {
+                    showUploads = true
+                    viewModel.filePickerManager.confirmPhoneUpload(uploadSource)
+                },
+                onDismiss = viewModel.filePickerManager::cancelPhoneReview,
+            )
+        }
+
     if (showFilePicker) {
+        val workspaceDirectory =
+            attachmentWorkspace.directory
+                ?: stringResource(R.string.picker_server_workspace)
         FilePickerDialog(
-            files = pickerFiles,
+            files =
+                if (choosingUploadFolder) pickerFiles.filter { it.isDirectory } else pickerFiles,
             currentPath = pickerCurrentPath,
+            workspaceLabel = "${attachmentWorkspace.server.displayName}\n$workspaceDirectory",
             isLoading = isPickerLoading,
             error = pickerError,
             selectedFiles = attachedFiles,
-            onUploadClick = { uploadLauncher.launch(arrayOf("*/*")) },
+            choosingDirectory = choosingUploadFolder,
             onNavigateTo = { path -> viewModel.filePickerManager.loadPickerFiles(path.ifBlank { "." }) },
             onNavigateUp = {
                 val parent = pickerCurrentPath.substringBeforeLast("/", "")
@@ -754,17 +890,34 @@ fun ChatScreen(
             },
             onFileSelected = { viewModel.filePickerManager.attachFile(it) },
             onFileDeselected = { viewModel.filePickerManager.detachFile(it) },
-            onConfirm = { showFilePicker = false },
-            onDismiss = { showFilePicker = false }
+            onConfirm = {
+                showFilePicker = false
+                choosingUploadFolder = false
+            },
+            onDismiss = {
+                showFilePicker = false
+                choosingUploadFolder = false
+            },
         )
     }
 
-    if (!uploadState.isEmpty) {
+    if (showUploads && (!uploadState.isEmpty || uploadState.isActive)) {
         UploadProgressSheet(
             state = uploadState,
             onCancel = { viewModel.filePickerManager.cancelUploads() },
-            onDismiss = { viewModel.filePickerManager.dismissUploadResult() },
+            // Dismissal must clear the terminal queue, not just hide the sheet: the gate above
+            // re-opens on the retained state, and a remembered visibility flag is lost on the
+            // next composition (tab re-entry, rotation, restore), so the summary would return.
+            onDismiss = {
+                viewModel.filePickerManager.dismissUploadResult()
+                showUploads = false
+            },
             onRetryFailed = { viewModel.filePickerManager.retryFailedUploads() },
+            onRemoveFailed = {
+                viewModel.filePickerManager.dismissUploadResult()
+                showUploads = false
+            },
+            contextLabel = stringResource(R.string.upload_sheet_draft_context),
         )
     }
 

@@ -48,7 +48,7 @@ internal class OfishCommandBuilder {
             mkdir -p -- "${'$'}D" || { printf '### 500 failed reason=mkdir\n'; exit 0; }
             EXISTED=0
             [ -e "${'$'}P" ] && EXISTED=1
-            TMP=${'$'}(mktemp "${'$'}D/.ofish.XXXXXX") || { printf '### 500 failed reason=mktemp\n'; exit 0; }
+            TMP=${'$'}(mktemp "./${'$'}D/.ofish.XXXXXX") || { printf '### 500 failed reason=mktemp\n'; exit 0; }
             cleanup() { rm -f -- "${'$'}TMP" >/dev/null 2>&1 || true; }
             trap cleanup EXIT INT TERM
             base64 ${base64DecodeFlag(capabilities)} > "${'$'}TMP" <<'$delimiter'
@@ -138,6 +138,7 @@ internal class OfishCommandBuilder {
         path: String,
         expectedHash: String?,
         capabilities: OfishCapabilities,
+        createOnly: Boolean = false,
     ): String = wrap(
         buildString {
             val parent = parentDirectory(path)
@@ -145,10 +146,13 @@ internal class OfishCommandBuilder {
             appendHashFunction(requireHashCommand(capabilities))
             appendSymlinkGuard("P")
             appendExpectedHashGuard()
+            if (createOnly) {
+                appendLine("if [ -e \"\$P\" ]; then printf '### 409 conflict\\n'; exit 0; fi")
+            }
             append(
                 """
             mkdir -p -- "${'$'}D" || { printf '### 500 failed reason=mkdir\n'; exit 0; }
-            TMP=${'$'}(mktemp "${'$'}D/.ofish.upload.XXXXXX") || { printf '### 500 failed reason=mktemp\n'; exit 0; }
+            TMP=${'$'}(mktemp "./${'$'}D/.ofish.upload.XXXXXX") || { printf '### 500 failed reason=mktemp\n'; exit 0; }
             printf '### 200 ok upload=%s\n' "${'$'}TMP"
             exit 0
                 """.trimIndent()
@@ -194,6 +198,7 @@ internal class OfishCommandBuilder {
         uploadToken: String,
         expectedHash: String?,
         capabilities: OfishCapabilities,
+        createOnly: Boolean = false,
     ): String = wrap(
         buildString {
             appendCommonHeader(
@@ -213,7 +218,12 @@ internal class OfishCommandBuilder {
             if [ ! -f "${'$'}TMP" ]; then printf '### 412 precondition reason=missing_tmp\n'; exit 0; fi
             if [ -n "${'$'}MODE" ]; then chmod "${'$'}MODE" "${'$'}TMP" || { printf '### 500 failed reason=chmod\n'; exit 0; }; fi
             if [ -L "${'$'}P" ] || [ -L "${'$'}TMP" ]; then printf '### 412 precondition reason=symlink\n'; exit 0; fi
-            mv -f -- "${'$'}TMP" "${'$'}P" || { printf '### 500 failed reason=mv\n'; exit 0; }
+                """.trimIndent()
+            )
+            append('\n')
+            appendUploadFinishMove(createOnly)
+            append(
+                """
             HASH=${'$'}(hash_file "${'$'}P")
             printf '### 200 ok hash=%s\n' "${'$'}HASH"
             exit 0
@@ -221,6 +231,37 @@ internal class OfishCommandBuilder {
             )
         }
     )
+
+    private fun StringBuilder.appendUploadFinishMove(createOnly: Boolean) {
+        append(
+            if (createOnly) {
+                """
+            command -v ln >/dev/null 2>&1 || { printf '### 501 caps_missing ln\n'; exit 0; }
+            if [ -d "${'$'}P" ]; then printf '### 409 conflict\n'; exit 0; fi
+            ln "./${'$'}TMP" "./${'$'}P" 2>/dev/null || {
+              if [ -e "${'$'}P" ] || [ -L "${'$'}P" ]; then
+                printf '### 409 conflict\n'
+              else
+                printf '### 500 failed reason=ln\n'
+              fi
+              exit 0
+            }
+            if [ -d "${'$'}P" ]; then
+              if [ "${'$'}P/${'$'}{TMP##*/}" -ef "${'$'}TMP" ]; then rm -f -- "${'$'}P/${'$'}{TMP##*/}"; fi
+              printf '### 409 conflict\n'
+              exit 0
+            fi
+            rm -f -- "${'$'}TMP"
+                """.trimIndent()
+            } else {
+                """
+            if [ -d "${'$'}P" ]; then printf '### 412 precondition reason=directory\n'; exit 0; fi
+            mv -f -- "${'$'}TMP" "${'$'}P" || { printf '### 500 failed reason=mv\n'; exit 0; }
+                """.trimIndent()
+            },
+        )
+        append('\n')
+    }
 
     fun uploadAbort(uploadToken: String): String = wrap(
         buildString {
@@ -260,7 +301,7 @@ internal class OfishCommandBuilder {
             """
             hash_file() {
               if [ -f "${'$'}1" ]; then
-                $command "${'$'}1" 2>/dev/null | awk '{print ${'$'}1}'
+                $command "./${'$'}1" 2>/dev/null | awk '{print ${'$'}1}'
               else
                 printf ''
               fi
@@ -297,7 +338,7 @@ internal class OfishCommandBuilder {
         appendLine("MODE=''")
         appendSymlinkGuard("P")
         appendLine(
-            "if [ -e \"${'$'}P\" ]; then MODE=${'$'}($command \"${'$'}P\") || " +
+            "if [ -e \"${'$'}P\" ]; then MODE=${'$'}($command \"./${'$'}P\") || " +
                 "{ printf '### 500 failed reason=mode\\n'; exit 0; }; fi",
         )
     }

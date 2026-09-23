@@ -13,7 +13,7 @@ import java.util.Locale
 
 /** Format a byte size into a short human-readable string (B/KB/MB/GB). */
 fun formatFileSize(bytes: Long): String = when {
-    bytes < 0L -> "0 B"
+    bytes < 0L -> "Unknown size"
     bytes < 1024L -> "$bytes B"
     bytes < 1024L * 1024L -> "${bytes / 1024L} KB"
     bytes < 1024L * 1024L * 1024L ->

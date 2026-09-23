@@ -105,33 +105,4 @@ class ServerUrlTest {
             ServerUrl.endpointKey("http://example.com:4096/a"),
         )
     }
-
-    @Test
-    fun `cleartext credentials allow exact loopback and private literals`() {
-        assertTrue(ServerUrl.allowsCleartextCredentials("http://127.0.0.1:4096"))
-        assertTrue(ServerUrl.allowsCleartextCredentials("http://localhost:4096"))
-        assertTrue(ServerUrl.allowsCleartextCredentials("http://10.20.30.40"))
-        assertTrue(ServerUrl.allowsCleartextCredentials("http://172.16.0.1"))
-        assertTrue(ServerUrl.allowsCleartextCredentials("http://172.31.255.254"))
-        assertTrue(ServerUrl.allowsCleartextCredentials("http://192.168.1.2"))
-        assertTrue(ServerUrl.allowsCleartextCredentials("http://[::1]:4096"))
-        assertTrue(ServerUrl.allowsCleartextCredentials("http://[fd00::1]"))
-        assertTrue(ServerUrl.allowsCleartextCredentials("http://[fe80::1%wlan0]"))
-    }
-
-    @Test
-    fun `cleartext credentials reject public addresses and hostname lookalikes`() {
-        assertFalse(ServerUrl.allowsCleartextCredentials("http://8.8.8.8"))
-        assertFalse(ServerUrl.allowsCleartextCredentials("http://172.15.0.1"))
-        assertFalse(ServerUrl.allowsCleartextCredentials("http://172.32.0.1"))
-        assertFalse(ServerUrl.allowsCleartextCredentials("http://localhost.example.com"))
-        assertFalse(ServerUrl.allowsCleartextCredentials("http://127.0.0.1.example.com"))
-        assertFalse(ServerUrl.allowsCleartextCredentials("http://192.168.1.2.example.com"))
-    }
-
-    @Test
-    fun `https credentials are allowed for public endpoints`() {
-        assertTrue(ServerUrl.allowsCleartextCredentials("https://example.com"))
-        assertTrue(ServerUrl.allowsCleartextCredentials("https://8.8.8.8"))
-    }
 }

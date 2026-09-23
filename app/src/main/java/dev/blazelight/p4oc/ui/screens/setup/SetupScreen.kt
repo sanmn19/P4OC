@@ -46,7 +46,6 @@ import dev.blazelight.p4oc.core.network.ServerUrl
 import dev.blazelight.p4oc.ui.components.TuiSwitch
 import dev.blazelight.p4oc.ui.screens.server.ServerUiState
 import dev.blazelight.p4oc.ui.screens.server.ServerViewModel
-import dev.blazelight.p4oc.ui.screens.server.serverCleartextCredentialWarning
 import dev.blazelight.p4oc.ui.screens.server.serverSetupHelpContent
 import dev.blazelight.p4oc.ui.screens.server.serverSetupHelpToggle
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
@@ -109,11 +108,6 @@ fun SetupScreen(
                 Spacer(Modifier.height(Spacing.lg))
                 serverUrlField(uiState.remoteUrl, viewModel::setRemoteUrl)
                 credentialsPanel(uiState, viewModel)
-                serverCleartextCredentialWarning(
-                    url = uiState.remoteUrl,
-                    username = uiState.username,
-                    password = uiState.password,
-                )
                 connectButton(uiState, viewModel::connectToRemote)
                 setupError(uiState.error)
                 discoverySection(uiState, viewModel)
