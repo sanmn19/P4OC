@@ -84,12 +84,9 @@ fun AttachmentSourceSheet(
             )
             HorizontalDivider(color = theme.border)
             Column(Modifier.fillMaxWidth().padding(vertical = Spacing.sm)) {
-                AttachmentSheetNote(stringResource(R.string.attach_sheet_note))
-                TuiDivider(Modifier.padding(horizontal = Spacing.md))
                 AttachmentSourceRow(
                     icon = Icons.Default.PhotoLibrary,
                     label = stringResource(R.string.attach_source_photos),
-                    description = stringResource(R.string.attach_source_photos_description),
                     testTag = "attach_photos",
                     onClick = onPhotos,
                 )
@@ -97,7 +94,6 @@ fun AttachmentSourceSheet(
                 AttachmentSourceRow(
                     icon = Icons.AutoMirrored.Filled.InsertDriveFile,
                     label = stringResource(R.string.attach_source_phone_files),
-                    description = stringResource(R.string.attach_source_phone_files_description),
                     testTag = "attach_phone_files",
                     onClick = onPhoneFiles,
                 )
@@ -105,7 +101,6 @@ fun AttachmentSourceSheet(
                 AttachmentSourceRow(
                     icon = Icons.Default.FolderOpen,
                     label = stringResource(R.string.attach_source_workspace),
-                    description = stringResource(R.string.attach_source_workspace_description),
                     testTag = "attach_workspace",
                     onClick = onWorkspace,
                 )
@@ -197,7 +192,7 @@ private fun ColumnScope.ReviewBody(
         text = stringResource(R.string.attach_review_limits),
         color = theme.textMuted,
         style = MaterialTheme.typography.bodySmall,
-        modifier = Modifier.padding(horizontal = Spacing.md),
+        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
     )
 }
 
@@ -311,7 +306,6 @@ private fun AttachmentSheetNote(text: String) {
 private fun AttachmentSourceRow(
     icon: ImageVector,
     label: String,
-    description: String,
     testTag: String,
     onClick: () -> Unit,
 ) {
@@ -321,7 +315,7 @@ private fun AttachmentSourceRow(
             .fillMaxWidth()
             .heightIn(min = Sizing.minTouchTarget)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = Spacing.md, vertical = Spacing.sm)
+            .padding(horizontal = Spacing.md, vertical = Spacing.xs)
             .testTag(testTag),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.md),
@@ -332,10 +326,12 @@ private fun AttachmentSourceRow(
             tint = theme.accent,
             modifier = Modifier.size(Sizing.iconMd),
         )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, color = theme.text)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = theme.textMuted)
-        }
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = theme.text,
+            modifier = Modifier.weight(1f),
+        )
         Icon(
             imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
@@ -354,44 +350,36 @@ private fun ReviewDestinationPanel(
     val theme = LocalOpenCodeTheme.current
     val serverName = destination.substringBefore('\n').trim()
     val folderPath = destination.substringAfter('\n', "").trim()
-    val monoLabel = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(Sizing.strokeMd, theme.border, RectangleShape)
-            .padding(Spacing.sm),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        Modifier.fillMaxWidth().border(Sizing.strokeThin, theme.border, RectangleShape)
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-            Text(
-                text = stringResource(R.string.attach_review_destination),
-                style = monoLabel,
-                color = theme.textMuted,
-            )
-            Text(
-                text = serverName,
-                style = MaterialTheme.typography.bodyMedium,
-                color = theme.text,
-            )
-            if (folderPath.isNotEmpty()) {
-                Text(
-                    text = folderPath,
-                    style = monoLabel,
-                    color = theme.textMuted,
-                )
-            }
-        }
-        TuiTextButton(
-            onClick = onChangeFolder,
-            modifier = Modifier.testTag("upload_change_folder"),
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = stringResource(R.string.attach_review_change_folder),
+                text = stringResource(R.string.attach_review_destination),
                 style = MaterialTheme.typography.labelMedium,
-                color = theme.accent,
+                color = theme.textMuted,
             )
+            TuiTextButton(
+                onClick = onChangeFolder,
+                modifier = Modifier.testTag("upload_change_folder"),
+            ) {
+                Text(stringResource(R.string.attach_review_change_folder), color = theme.accent)
+            }
         }
+        Text(
+            text = folderPath,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = theme.text,
+            maxLines = 2,
+            overflow = TextOverflow.MiddleEllipsis,
+        )
+        Text(serverName, style = MaterialTheme.typography.labelSmall, color = theme.textMuted)
     }
 }
 

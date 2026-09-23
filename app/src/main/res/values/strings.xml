@@ -983,6 +983,7 @@
     <string name="cd_upload_files">Upload files here</string>
     <string name="upload_sheet_title">[ Uploading files ]</string>
     <string name="upload_sheet_done_title">[ Upload complete ]</string>
+    <string name="upload_sheet_failed_title">[ Upload needs attention ]</string>
     <string name="upload_sheet_progress">Uploading %1$d of %2$d: %3$s — %4$s / %5$s</string>
     <string name="upload_sheet_summary">%1$d uploaded · %2$d failed</string>
     <!-- File language labels -->
@@ -999,7 +1000,7 @@
     <string name="file_language_plain_text">plain text</string>
 
     <string name="upload_sheet_cancel">Cancel</string>
-    <string name="upload_sheet_dismiss">Dismiss</string>
+    <string name="upload_sheet_dismiss">Done</string>
     <string name="upload_sheet_retry_failed">Retry failed</string>
     <string name="upload_phase_pending">pending</string>
     <string name="upload_phase_reading">reading</string>
@@ -1019,21 +1020,21 @@
     <string name="chat_attachment_workspace_changed_message">No files were uploaded. Open the intended chat and choose the files again.</string>
     <!-- Attachment source sheet and phone upload review -->
     <string name="attach_sheet_title">[ Attach ]</string>
-    <string name="attach_sheet_note">From your phone or this workspace.</string>
     <string name="attach_sheet_privacy_note">Nothing is sent to the agent until you send.</string>
     <string name="attach_source_photos">Photos</string>
-    <string name="attach_source_photos_description">Screenshots and images</string>
     <string name="attach_source_phone_files">Files from phone</string>
-    <string name="attach_source_phone_files_description">Documents, configs and archives</string>
     <string name="attach_source_workspace">Workspace files</string>
-    <string name="attach_source_workspace_description">Already in the project workspace</string>
     <string name="attach_review_title">[ Review upload ]</string>
     <string name="attach_review_no_files">No files selected.</string>
-    <string name="attach_review_limits">Up to 1 GiB per file. Existing files are not replaced. Uploading adds files to this draft; use Send when ready.</string>
-    <string name="attach_review_destination">[ Destination ]</string>
+    <string name="attach_review_limits">Max 1 GiB per file. Existing files won’t be replaced. Uploading saves files to this workspace; Send shares them with the agent.</string>
+    <string name="attach_review_destination">Upload to</string>
     <string name="attach_review_change_folder">Change folder</string>
     <string name="attach_review_workspace_required">Open a project workspace before uploading files.</string>
     <string name="attach_review_upload_action">Upload &amp; attach</string>
+    <plurals name="upload_sheet_success_summary">
+        <item quantity="one">%d file uploaded</item>
+        <item quantity="other">%d files uploaded</item>
+    </plurals>
     <plurals name="attach_review_file_count">
         <item quantity="one">%d file</item>
         <item quantity="other">%d files</item>
@@ -1060,7 +1061,7 @@
     <string name="picker_server_workspace">Server workspace</string>
     <string name="upload_sheet_preparing">Preparing files…</string>
     <string name="upload_sheet_remove_failed">Remove failed</string>
-    <string name="upload_sheet_draft_context">Ready files stay in your draft. Removing failed uploads never deletes workspace files.</string>
+    <string name="upload_sheet_draft_context">Removing failed uploads won’t delete workspace files.</string>
     <!-- Mirrors OfishMutationClient.UPLOAD_TOO_LARGE_MESSAGE for the pre-upload review row. -->
     <string name="upload_too_large_message">File is too large to upload (maximum 1 GiB)</string>
     <string name="attach_review_unreadable_file">Cannot read this file. Remove it and choose it again.</string>
