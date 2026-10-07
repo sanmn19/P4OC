@@ -20,10 +20,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
+@Suppress("LongParameterList")
 class SessionRepositoryProvider(
     private val activeServerApiProvider: ActiveServerApiProvider,
     private val messageMapper: MessageMapper,
     private val serverConnectionRegistry: ServerConnectionRegistry,
+    private val messageStore: SessionMessageStore? = null,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val repositoryDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val json: Json = Json.Default,
@@ -67,6 +69,7 @@ class SessionRepositoryProvider(
             val repository = SessionRepositoryImpl(
                 workspaceClient,
                 messageMapper,
+                messageStore = messageStore,
                 dispatcher = repositoryDispatcher,
             )
             Entry(

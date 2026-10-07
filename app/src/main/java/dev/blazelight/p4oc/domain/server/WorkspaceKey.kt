@@ -15,3 +15,10 @@ sealed interface WorkspaceKey {
     @JvmInline
     value class SessionScoped(val sessionId: SessionId) : WorkspaceKey
 }
+
+/** Stable, filesystem/bundle-safe string identity shared by cache and provider key structures. */
+fun WorkspaceKey.stableCacheKey(): String = when (this) {
+    WorkspaceKey.Global -> "global"
+    is WorkspaceKey.Directory -> "directory:${value.trimEnd('/')}"
+    is WorkspaceKey.SessionScoped -> "session:${sessionId.value}"
+}

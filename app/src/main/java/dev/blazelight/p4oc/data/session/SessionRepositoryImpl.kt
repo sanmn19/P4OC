@@ -26,6 +26,7 @@ import dev.blazelight.p4oc.domain.model.SessionStatus
 import dev.blazelight.p4oc.domain.model.TokenUsage
 import dev.blazelight.p4oc.domain.model.ToolState
 import dev.blazelight.p4oc.domain.model.isQuestionTool
+import dev.blazelight.p4oc.domain.server.stableCacheKey
 import dev.blazelight.p4oc.domain.session.SessionId
 import dev.blazelight.p4oc.domain.session.WorkspaceSession
 import dev.blazelight.p4oc.domain.workspace.Workspace
@@ -57,6 +58,7 @@ import kotlin.coroutines.coroutineContext
 class SessionRepositoryImpl(
     private val client: SessionWorkspaceClient,
     private val messageMapper: MessageMapper? = null,
+    private val messageStore: SessionMessageStore? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val questionFetcher: (suspend () -> List<QuestionRequestDto>)? = null,
@@ -524,7 +526,7 @@ class SessionRepositoryImpl(
             if (!canRecover(sessionId) || loaded.isEmpty()) {
                 null
             } else {
-                mergeLoadedMessages(sessionId, loaded)
+                mergePreservingSse(sessionId, loaded)
                 sessionLoadedLimits[sessionId] = maxOf(sessionLoadedLimits[sessionId] ?: 0, limit)
                 sessionRevisions[sessionId] = (sessionRevisions[sessionId] ?: 0L) + 1
                 sessionLeaseGenerations[sessionId] ?: 0L
@@ -539,6 +541,32 @@ class SessionRepositoryImpl(
             } catch (e: Exception) {
                 AppLog.w(TAG, "Post-reconnect pending reconciliation failed for $sessionId: ${e.javaClass.simpleName}")
             }
+        }
+    }
+
+    /**
+     * Union merge for the raced-recovery fallback: the fetched REST snapshot raced live SSE
+     * mutations, so it may omit messages the live stream already applied. Nothing that exists in
+     * current state is dropped; fetched-only messages are imported; same-id entries keep the
+     * SSE-newer parts preference.
+     */
+    private fun mergePreservingSse(sessionId: String, loaded: List<MessageWithParts>) {
+        val state = messageState(sessionId)
+        state.update { current ->
+            val currentById = current.associateBy { it.message.id }
+            val merged = loaded.map { loadedMessage ->
+                val currentMessage = currentById[loadedMessage.message.id]
+                if (currentMessage == null) {
+                    loadedMessage
+                } else {
+                    MessageWithParts(
+                        currentMessage.message,
+                        mergeParts(loadedMessage.parts, currentMessage.parts),
+                    )
+                }
+            }
+            val loadedIds = merged.map { it.message.id }.toSet()
+            (merged + current.filter { it.message.id !in loadedIds }).sortedBy { it.message.createdAt }
         }
     }
 
@@ -682,6 +710,7 @@ class SessionRepositoryImpl(
             sessionLeaseGenerations[sessionId.value] = (sessionLeaseGenerations[sessionId.value] ?: 0L) + 1
             sessionConsumerCounts[sessionId.value] = sessionConsumerCounts.getOrDefault(sessionId.value, 0) + 1
         }
+        seedCachedMessages(sessionId.value)
         val released = AtomicBoolean(false)
         return AutoCloseable {
             if (released.compareAndSet(false, true)) releaseSession(sessionId.value)
@@ -689,6 +718,7 @@ class SessionRepositoryImpl(
     }
 
     private fun releaseSession(sessionId: String) {
+        var releasedMessages: List<MessageWithParts>? = null
         synchronized(messageStateLock) {
             val remaining = (sessionConsumerCounts[sessionId] ?: return) - 1
             if (remaining > 0) {
@@ -698,7 +728,10 @@ class SessionRepositoryImpl(
                 sessionConsumerCounts.remove(sessionId)
             }
 
-            messageStates.remove(sessionId)?.value = emptyList()
+            val removed = messageStates.remove(sessionId)
+            releasedMessages = removed?.value
+            // Observers holding the evicted flow see the reset even though the object is detached.
+            removed?.value = emptyList()
             // Bump rather than delete the revision so a fetch that captured the pre-release revision
             // cannot commit after the lease is gone.
             sessionRevisions[sessionId] = (sessionRevisions[sessionId] ?: 0L) + 1
@@ -710,6 +743,7 @@ class SessionRepositoryImpl(
                 sessionUiStates.remove(sessionId)?.value = SessionUiState()
             }
         }
+        releasedMessages?.takeIf { it.isNotEmpty() }?.let { persistCachedMessages(sessionId, it) }
     }
 
     override fun clearPermission(sessionId: SessionId, permissionId: String) {
@@ -792,7 +826,7 @@ class SessionRepositoryImpl(
         val mapper = messageMapper ?: error("Message loading requires MessageMapper")
         val messages = workspaceClient.getMessages(sessionId.value, limit).map { dto -> mapper.mapWrapperToDomain(dto) }
         synchronized(messageStateLock) {
-            mergeLoadedMessages(sessionId.value, messages)
+            mergeFetchedWindow(sessionId.value, messages)
             // Record the requested bound, not the count returned: the server may supply fewer
             // messages than requested, and recovery should re-fetch the same bounded window that
             // was actually loaded (largest successfully loaded history limit).
@@ -855,13 +889,20 @@ class SessionRepositoryImpl(
         messageRecoveryJob = null
         invalidate()
         job.cancel("SessionRepository closed")
-        synchronized(messageStateLock) {
+        val persistables = synchronized(messageStateLock) {
+            val captured = messageStates.entries
+                .map { (id, flow) -> id to flow.value }
+                .toMap()
             messageStates.clear()
             sessionRevisions.clear()
             sessionLoadedLimits.clear()
             sessionConsumerCounts.clear()
             recoveryInvalidatedSessions.clear()
             sessionLeaseGenerations.clear()
+            captured
+        }
+        persistables.forEach { (id, messages) ->
+            if (messages.isNotEmpty()) persistCachedMessages(id, messages)
         }
         synchronized(sessionUiStates) { sessionUiStates.clear() }
         synchronized(childToParentSessionIds) { childToParentSessionIds.clear() }
@@ -1119,6 +1160,54 @@ class SessionRepositoryImpl(
             messageStates.getOrPut(sessionId) { MutableStateFlow(emptyList()) }
         }
 
+    // Repository-owned cache identity: server endpoint key + workspace stable key + session id.
+    private val cacheServerKey: String = client.workspace.server.endpointKey
+    private val cacheWorkspaceKey: String = client.workspace.key.stableCacheKey()
+
+    /**
+     * Seeds a freshly acquired lease with the store's persisted window. Add-only under the
+     * message-state lock: if an entry fetch or live SSE traffic already populated the session,
+     * the cache loses. No revision bump and no network request.
+     */
+    private fun seedCachedMessages(sessionId: String) {
+        val store = messageStore ?: return
+        scope.launch {
+            val cached = runCatching { store.load(cacheServerKey, cacheWorkspaceKey, sessionId) }
+                .getOrElse { error ->
+                    AppLog.w(TAG, "Session cache load failed for $sessionId: ${error.javaClass.simpleName}")
+                    return@launch
+                } ?: return@launch
+            val additions = cached.messages
+            if (additions.isEmpty()) return@launch
+            synchronized(messageStateLock) {
+                val existing = messageStates[sessionId] ?: MutableStateFlow<List<MessageWithParts>>(emptyList()).also {
+                    messageStates[sessionId] = it
+                }
+                val presentIds = existing.value.map { it.message.id }.toSet()
+                val missing = additions.filter { it.message.id !in presentIds }
+                if (missing.isNotEmpty()) {
+                    existing.value = (existing.value + missing).sortedBy { it.message.createdAt }
+                }
+            }
+        }
+    }
+
+    /** Fire-and-forget cache write; failures are logged and never disturb the lifecycle. */
+    private fun persistCachedMessages(sessionId: String, messages: List<MessageWithParts>) {
+        val store = messageStore ?: return
+        val cleaned = messages.map { messageWithParts ->
+            messageWithParts.copy(
+                parts = messageWithParts.parts.map { part ->
+                    if (part is Part.Text && part.isStreaming) part.copy(isStreaming = false) else part
+                },
+            )
+        }
+        runCatching { store.save(cacheServerKey, cacheWorkspaceKey, sessionId, cleaned, nowMs()) }
+            .onFailure { error ->
+                AppLog.w(TAG, "Session cache save failed for $sessionId: ${error.javaClass.simpleName}")
+            }
+    }
+
     /**
      * Apply [transform] to the session's message state and bump its revision so any in-flight
      * reconnect recovery that captured the prior revision will detect the race and refuse to
@@ -1230,37 +1319,46 @@ class SessionRepositoryImpl(
         }
     }
 
-    private fun mergeLoadedMessages(
-        sessionId: String,
-        loaded: List<MessageWithParts>,
-    ) {
-        val state = messageState(sessionId)
-        state.update { current ->
-            val currentById = current.associateBy { it.message.id }
-            loaded.map { loadedMessage ->
-                val currentMessage = currentById[loadedMessage.message.id]
-                if (currentMessage == null) {
-                    loadedMessage
-                } else {
-                    // Existing state may contain a newer SSE update than the bounded REST
-                    // snapshot. Keep it authoritative while merging older history around it.
-                    MessageWithParts(
-                        currentMessage.message,
-                        mergeParts(loadedMessage.parts, currentMessage.parts),
-                    )
-                }
-            }.let { mergedLoaded ->
-                val loadedIds = mergedLoaded.map { it.message.id }.toSet()
-                (mergedLoaded + current.filter { it.message.id !in loadedIds }).sortedBy { it.message.createdAt }
-            }
-        }
-    }
-
     private fun mergeParts(loaded: List<Part>, current: List<Part>): List<Part> {
         val loadedById = loaded.associateBy { it.id }
         val currentById = current.associateBy { it.id }
         val mergedIds = loaded.map { it.id } + current.map { it.id }.filterNot { it in loadedById }
         return mergedIds.mapNotNull { id -> currentById[id] ?: loadedById[id] }
+    }
+
+    /**
+     * Merge a server-fetched newest-N window over the current state.
+     *
+     * The fetched window is authoritative for its own range: same-id current entries keep the
+     * SSE-newer parts preference (a bounded REST snapshot can lag a live stream), but current
+     * messages that fall inside the fetched range and were not returned by the server are dropped
+     * so deleted or removed conversations cannot resurrect from cache or prior state. Messages
+     * strictly older than the fetched window remain, preserving pagination history.
+     */
+    private fun mergeFetchedWindow(sessionId: String, fetched: List<MessageWithParts>) {
+        if (fetched.isEmpty()) return
+        val state = messageState(sessionId)
+        state.update { current ->
+            val currentById = current.associateBy { it.message.id }
+            val window = fetched.map { fetchedMessage ->
+                val currentMessage = currentById[fetchedMessage.message.id]
+                if (currentMessage == null) {
+                    fetchedMessage
+                } else {
+                    MessageWithParts(
+                        currentMessage.message,
+                        mergeParts(fetchedMessage.parts, currentMessage.parts),
+                    )
+                }
+            }
+            val fetchedIds = fetched.map { it.message.id }.toSet()
+            val fetchedOldestCreatedAt = fetched.minOf { it.message.createdAt }
+            val olderTail = current.filter { messageWithParts ->
+                messageWithParts.message.id !in fetchedIds &&
+                    messageWithParts.message.createdAt < fetchedOldestCreatedAt
+            }
+            (window + olderTail).sortedBy { it.message.createdAt }
+        }
     }
 
     private fun upsertMessage(message: Message) {

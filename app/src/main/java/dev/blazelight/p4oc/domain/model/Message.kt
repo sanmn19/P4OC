@@ -80,6 +80,7 @@ data class ApiError(
 )
 
 @Immutable
+@kotlinx.serialization.Serializable
 data class MessageWithParts(
     val message: Message,
     val parts: List<Part>
