@@ -49,7 +49,7 @@ import dev.blazelight.p4oc.ui.screens.settings.*
 import dev.blazelight.p4oc.ui.screens.terminal.TerminalScreen
 import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner
 import dev.blazelight.p4oc.ui.workspace.WorkspaceViewModel
-import kotlinx.coroutines.launch
+import dev.blazelight.p4oc.ui.workspace.launchRefresh
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -241,7 +241,7 @@ fun TabNavHost(
                         onOpenTerminal = { onNewTerminalTab() },
                         onChooseTarget = onNewFilesTab,
                         onRefresh = {
-                            homeCoroutineScope.launch { workspaceOwner.sessionRepository.refresh() }
+                            workspaceOwner.launchRefresh(homeCoroutineScope)
                         },
                         onSettings = { navController.navigate(Screen.Settings.route) },
                     ),

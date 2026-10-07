@@ -117,6 +117,7 @@ import dev.blazelight.p4oc.ui.theme.ProjectColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner
+import dev.blazelight.p4oc.ui.workspace.launchRefresh
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -1033,7 +1034,7 @@ object MainTabScreen {
         }
         val onRefreshHome: () -> Unit = {
             distinctWorkspaceOwners.forEach { owner ->
-                deps.coroutineScope.launch { owner.sessionRepository.refresh() }
+                owner.launchRefresh(deps.coroutineScope)
             }
         }
 

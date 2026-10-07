@@ -1,6 +1,7 @@
 package dev.blazelight.p4oc
 
 import android.app.Application
+import dev.blazelight.p4oc.core.log.CrashRecorder
 import dev.blazelight.p4oc.core.notification.NotificationEventObserver
 import dev.blazelight.p4oc.di.allModules
 import org.koin.android.ext.android.inject
@@ -15,6 +16,7 @@ class PocketCodeApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        CrashRecorder.install(this)
         startKoin {
             androidLogger()
             androidContext(this@PocketCodeApp)

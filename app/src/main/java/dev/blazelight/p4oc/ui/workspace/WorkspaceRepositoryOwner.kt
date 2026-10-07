@@ -11,8 +11,10 @@ import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.server.ServerGeneration
 import dev.blazelight.p4oc.domain.workspace.Workspace
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadCoordinator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -39,8 +41,18 @@ class WorkspaceRepositoryOwner(
 
     init {
         AppLog.i(TAG, "WorkspaceRepositoryOwner.init")
+        // The initial snapshot refresh is best-effort duty: the repository surfaces failures
+        // through its state (Stale). A network timeout or any hydrate rethrow must never kill
+        // the whole app from a background launch.
+        @Suppress("TooGenericExceptionCaught") // resilience guard: refresh must never kill the app
         uploadScope.launch {
-            sessionRepository.refresh()
+            try {
+                sessionRepository.refresh()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                AppLog.w(TAG, "Initial workspace refresh failed: ${e.javaClass.simpleName}")
+            }
         }
     }
 
@@ -59,5 +71,24 @@ class WorkspaceRepositoryOwner(
 
     private companion object {
         const val TAG = "WorkspaceRepositoryOwner"
+    }
+}
+
+/**
+ * Launches [WorkspaceRepositoryOwner.sessionRepository.refresh][SessionRepositoryImpl.refresh] on
+ * [scope] as best-effort duty. The repository surfaces refresh failures through its own state
+ * (RepoState.Stale); a network timeout rethrown from hydrate must only be logged here, never
+ * crash the app.
+ */
+private const val REFRESH_TAG = "WorkspaceRepositoryOwner"
+
+@Suppress("TooGenericExceptionCaught") // resilience guard: refresh must never kill the app
+fun WorkspaceRepositoryOwner.launchRefresh(scope: CoroutineScope): Job = scope.launch {
+    try {
+        sessionRepository.refresh()
+    } catch (ce: CancellationException) {
+        throw ce
+    } catch (e: Exception) {
+        AppLog.w(REFRESH_TAG, "Workspace refresh failed: ${e.javaClass.simpleName}")
     }
 }
