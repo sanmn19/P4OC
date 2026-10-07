@@ -74,6 +74,35 @@ sealed class OpenCodeEvent {
     data class ServerInstanceDisposed(val directory: String) : OpenCodeEvent()
 }
 
+/**
+ * One authority for which events carry or mutate per-session state. Consumers that fan events
+ * out to workspace-scoped repositories use this instead of reimplementing type lists, so a
+ * new session-bearing event automatically extends the same delivery rule.
+ */
+fun OpenCodeEvent.isSessionScopedEvent(): Boolean = when (this) {
+    is OpenCodeEvent.MessageUpdated -> true
+    is OpenCodeEvent.MessagePartUpdated -> true
+    is OpenCodeEvent.MessagePartDelta -> true
+    is OpenCodeEvent.MessageRemoved -> true
+    is OpenCodeEvent.PartRemoved -> true
+    is OpenCodeEvent.SessionCreated -> true
+    is OpenCodeEvent.SessionUpdated -> true
+    is OpenCodeEvent.SessionDeleted -> true
+    is OpenCodeEvent.SessionStatusChanged -> true
+    is OpenCodeEvent.SessionDiff -> true
+    is OpenCodeEvent.SessionError -> true
+    is OpenCodeEvent.SessionCompacted -> true
+    is OpenCodeEvent.SessionIdle -> true
+    is OpenCodeEvent.PermissionRequested -> true
+    is OpenCodeEvent.PermissionReplied -> true
+    is OpenCodeEvent.QuestionAsked -> true
+    is OpenCodeEvent.QuestionReplied -> true
+    is OpenCodeEvent.QuestionRejected -> true
+    is OpenCodeEvent.TodoUpdated -> true
+    is OpenCodeEvent.CommandExecuted -> true
+    else -> false
+}
+
 @Serializable
 sealed class SessionStatus {
     @Serializable
