@@ -215,6 +215,9 @@ class ChatViewModel constructor(
 
         /** Recent tail fetched on a cache-seeded re-entry instead of the full history window. */
         private const val INCREMENTAL_TAIL_WINDOW = 25
+
+        /** Tail size for the post-send reconciliation poll; keeps each poll tick small. */
+        private const val SEND_RECONCILE_TAIL_WINDOW = 25
         private const val HTTP_TOO_MANY_REQUESTS = 429
         private const val KEY_DRAFT_TEXT = "chat_draft_text"
         private const val KEY_ATTACHED_FILES = "chat_attached_files"
@@ -383,11 +386,16 @@ class ChatViewModel constructor(
             beginLoadStep("Loading session messages")
             AppLog.d(TAG, "loadMessages() called")
 
+            // Restore the persistent cache deterministically BEFORE deciding the fetch: the
+            // seeding race (async restore racing this check) previously produced seeded=false on
+            // a fresh entry over an existing cache, forcing the full 100-message window refetch.
+            val seeded = runCatching {
+                sessionRepository.restoreCachedMessages(SessionId(sessionId))
+            }.getOrDefault(false)
             // Cache-seeded re-entry only needs a small recent tail to reconcile against the
-            // server; the full window is fetched exactly once on a cold entry and from the
-            // cached instant-paint then. The repo's merge keeps the fetched range authoritative
-            // (deletions repaired) while older cached history is retained for pagination.
-            val seeded = messages.value.isNotEmpty()
+            // server; the full window is fetched exactly once on a cold entry. The merge keeps
+            // the fetched range authoritative (deletions repaired) while older cached history
+            // is retained for pagination.
             val limit = if (seeded) INCREMENTAL_TAIL_WINDOW else INITIAL_HISTORY_LIMIT
             val result = safeApiCall {
                 sessionRepository.loadMessages(SessionId(sessionId), limit = limit)
@@ -689,10 +697,13 @@ class ChatViewModel constructor(
                 // published first bumps responseCompletedToken, whose collector cancels this very
                 // job while the recovery fetch is still in flight — the run then ends with the
                 // completed assistant reachable only via REST and no user-facing explanation.
-                // The repository's canonical active-lease, revision-safe recovery primitive is
-                // reused rather than a second message buffer or an unsafe overwrite path.
+                // The recent tail keeps this check small: the newest answer lives at the tail and
+                // the merge preserves SSE-newer content while repairing deletions in-window.
                 runCatching {
-                    sessionRepository.reconcileMessages(SessionId(sessionId))
+                    sessionRepository.loadMessages(
+                        SessionId(sessionId),
+                        limit = SEND_RECONCILE_TAIL_WINDOW,
+                    )
                 }.onFailure { error ->
                     if (error is CancellationException) throw error
                 }

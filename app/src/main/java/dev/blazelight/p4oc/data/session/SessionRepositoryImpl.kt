@@ -710,7 +710,6 @@ class SessionRepositoryImpl(
             sessionLeaseGenerations[sessionId.value] = (sessionLeaseGenerations[sessionId.value] ?: 0L) + 1
             sessionConsumerCounts[sessionId.value] = sessionConsumerCounts.getOrDefault(sessionId.value, 0) + 1
         }
-        seedCachedMessages(sessionId.value)
         val released = AtomicBoolean(false)
         return AutoCloseable {
             if (released.compareAndSet(false, true)) releaseSession(sessionId.value)
@@ -1172,30 +1171,33 @@ class SessionRepositoryImpl(
      * message-state lock: if an entry fetch or live SSE traffic already populated the session,
      * the cache loses. No revision bump and no network request.
      */
-    private fun seedCachedMessages(sessionId: String) {
-        val store = messageStore ?: return
-        scope.launch {
-            val cached = runCatching { store.load(cacheServerKey, cacheWorkspaceKey, sessionId) }
-                .getOrElse { error ->
-                    AppLog.w(TAG, "Session cache load failed for $sessionId: ${error.javaClass.simpleName}")
-                    return@launch
-                } ?: return@launch
+    override suspend fun restoreCachedMessages(sessionId: SessionId): Boolean {
+        val cached = messageStore
+            ?.runCatching { load(cacheServerKey, cacheWorkspaceKey, sessionId.value) }
+            ?.getOrNull()
+            ?.takeIf { persisted -> persisted.messages.isNotEmpty() }
+            ?: return false
+        mergeCachedEntry(sessionId, cached)
+        return true
+    }
+
+    private fun mergeCachedEntry(sessionId: SessionId, cached: CachedSessionMessages) {
+        synchronized(messageStateLock) {
             val additions = cached.messages
-            if (additions.isEmpty()) return@launch
-            synchronized(messageStateLock) {
-                val existing = messageStates[sessionId] ?: MutableStateFlow<List<MessageWithParts>>(emptyList()).also {
-                    messageStates[sessionId] = it
+            val existing = messageStates[sessionId.value]
+                ?: MutableStateFlow<List<MessageWithParts>>(emptyList()).also {
+                    messageStates[sessionId.value] = it
                 }
-                val presentIds = existing.value.map { it.message.id }.toSet()
-                val missing = additions.filter { it.message.id !in presentIds }
-                if (missing.isNotEmpty()) {
-                    existing.value = (existing.value + missing).sortedBy { it.message.createdAt }
-                }
-                // A cache older than today's memory restores the same bound reconnect recovery
-                // used before the stash, so recovery and paging keep consistent window sizes.
-                if (cached.loadedLimit > (sessionLoadedLimits[sessionId] ?: 0)) {
-                    sessionLoadedLimits[sessionId] = cached.loadedLimit
-                }
+            val presentIds = existing.value.map { it.message.id }.toSet()
+            val missing = additions
+                .filter { persisted -> persisted.message.id !in presentIds }
+            if (missing.isNotEmpty()) {
+                existing.value = (existing.value + missing).sortedBy { it.message.createdAt }
+            }
+            // A cache older than today's memory restores the same bound reconnect recovery used
+            // before the stash, so recovery and paging keep consistent window sizes.
+            if (cached.loadedLimit > (sessionLoadedLimits[sessionId.value] ?: 0)) {
+                sessionLoadedLimits[sessionId.value] = cached.loadedLimit
             }
         }
     }

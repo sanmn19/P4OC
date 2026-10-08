@@ -38,7 +38,7 @@ class SessionRepositoryMessageCacheTest {
     private val mapper = MessageMapper()
 
     @Test
-    fun `acquire seeds cached messages before any REST fetch`() = runTest {
+    fun `restoreCachedMessages seeds state before any REST fetch`() = runTest {
         val fixture = repository(
             testScheduler,
             store = FakeSessionMessageStore(
@@ -54,11 +54,15 @@ class SessionRepositoryMessageCacheTest {
         val lease = repo.acquireSession(sessionId)
         advanceUntilIdle()
 
+        val seeded = repo.restoreCachedMessages(sessionId)
+        advanceUntilIdle()
+
+        assertEquals(true, seeded)
         assertEquals(
             listOf("m1"),
             repo.messages(sessionId).value.map { it.message.id },
         )
-        // Cache seeding alone must not trigger a history fetch; the open flow fetches explicitly.
+        // Cache restore alone must not trigger a history fetch; the open flow fetches explicitly.
         coVerify(exactly = 0) { api.getMessages(any(), any(), any(), any(), any()) }
         lease.close()
     }
@@ -100,8 +104,10 @@ class SessionRepositoryMessageCacheTest {
         val repo = fixture.repo
 
         val lease = repo.acquireSession(sessionId)
+        val seeded = repo.restoreCachedMessages(sessionId)
         advanceUntilIdle()
 
+        assertEquals(false, seeded)
         assertEquals(emptyList<MessageWithParts>(), repo.messages(sessionId).value)
         lease.close()
     }
@@ -125,6 +131,7 @@ class SessionRepositoryMessageCacheTest {
         val repo = fixture.repo
         val api = fixture.api
         val lease = repo.acquireSession(sessionId)
+        repo.restoreCachedMessages(sessionId)
         advanceUntilIdle()
 
         coEvery { api.getMessages("s1", 100, null, "/test", null) } returns listOf(
@@ -160,6 +167,7 @@ class SessionRepositoryMessageCacheTest {
         val api = fixture.api
 
         repo.acquireSession(sessionId)
+        repo.restoreCachedMessages(sessionId)
         advanceUntilIdle()
 
         coEvery { api.getMessages("s1", 200, null, "/test", null) } returns (1L..200L)
