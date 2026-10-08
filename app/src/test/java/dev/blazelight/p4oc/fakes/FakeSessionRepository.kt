@@ -73,5 +73,7 @@ class FakeSessionRepository(
 
     override fun clearStreamingFlags(sessionId: SessionId) = Unit
 
+    override suspend fun restoreCachedMessages(sessionId: SessionId): Boolean = false
+
     override fun close() = Unit
 }

@@ -50,5 +50,13 @@ interface SessionRepository {
 
     fun clearStreamingFlags(sessionId: SessionId)
 
+    /**
+     * Restores the persistent cache's message window for [sessionId] into the session's live
+     * state before any server request. Deterministic (awaitable): callers gate the fetch-vs-
+     * incremental decision on this instead of racing an async seed. Returns true when the
+     * session's state holds content afterwards (cache-present or already-live).
+     */
+    suspend fun restoreCachedMessages(sessionId: SessionId): Boolean
+
     fun close()
 }

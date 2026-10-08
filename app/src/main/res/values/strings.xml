@@ -1088,4 +1088,11 @@
     <string name="start_work_server_workspaces">%1$s, %2$d workspaces</string>
     <string name="start_work_action_accessibility">%1$s. %2$s</string>
     <string name="server_close_details">Close server details</string>
+
+    <string name="live_connection_channel_name">Live connection</string>
+    <string name="live_connection_channel_desc">Keeps the OpenCode server connection alive in the background</string>
+    <string name="live_connection_notification_title">Live connection active</string>
+    <string name="live_connection_notification_fallback">Streaming updates in the background</string>
+    <string name="live_connection_keep_alive">Live background connection</string>
+    <string name="live_connection_keep_alive_desc">Keep streaming and notifications working while P4OC is minimized</string>
 </resources>

@@ -1,6 +1,7 @@
 package dev.blazelight.p4oc.di
 
 import androidx.lifecycle.SavedStateHandle
+import dev.blazelight.p4oc.core.connection.ConnectionForegroundCoordinator
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
 import dev.blazelight.p4oc.core.network.ConnectionManager
@@ -15,6 +16,8 @@ import dev.blazelight.p4oc.data.remote.mapper.EventMapper
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.server.StaleWorkspaceClientException
+import dev.blazelight.p4oc.data.session.FileSessionMessageStore
+import dev.blazelight.p4oc.data.session.SessionMessageStore
 import dev.blazelight.p4oc.data.session.SessionRepositoryImpl
 import dev.blazelight.p4oc.data.session.SessionRepositoryProvider
 import dev.blazelight.p4oc.data.vcs.WorkspaceChangesRepository
@@ -44,6 +47,7 @@ import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.module
+import java.io.File
 
 val appModule = module {
     // JSON serialization
@@ -95,7 +99,14 @@ val networkModule = module {
     single<ActiveServerApiProvider> {
         activeServerApiProvider(get())
     }
-    single { SessionRepositoryProvider(get(), get(), get(), json = get()) }
+    single { SessionRepositoryProvider(get(), get(), get(), messageStore = get(), json = get()) }
+    single<SessionMessageStore> {
+        FileSessionMessageStore(
+            rootDir = File(androidContext().filesDir, "session_message_cache"),
+            json = get(),
+        )
+    }
+    single { ConnectionForegroundCoordinator(androidContext(), get(), get()) }
 }
 
 val viewModelModule = module {

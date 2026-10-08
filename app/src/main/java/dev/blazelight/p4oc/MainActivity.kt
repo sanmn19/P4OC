@@ -5,15 +5,28 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
+import dev.blazelight.p4oc.core.log.CrashRecorder
 import dev.blazelight.p4oc.core.notification.NotificationRoute
 import dev.blazelight.p4oc.core.notification.NotificationRouteCodec
 import dev.blazelight.p4oc.ui.navigation.NavGraph
@@ -36,6 +49,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         pendingNotificationRoute.value = NotificationRouteCodec.read(intent)
 
+        // Debug builds record uncaught crashes and surface the trace once on the next launch
+        // so a failing device can relay the stack trace without a logcat connection.
+        val storedCrash = CrashRecorder.pendingCrash(this)
+        CrashRecorder.consume(this)
+
         setContent {
             val themeMode by settingsDataStore.themeMode.collectAsStateWithLifecycle(initialValue = "system")
             val themeName by settingsDataStore.themeName.collectAsStateWithLifecycle(
@@ -53,6 +71,9 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = LocalOpenCodeTheme.current.background
                 ) {
+                    if (storedCrash != null) {
+                        CrashReportDialog(trace = storedCrash, onDismiss = { finish() })
+                    }
                     // First launch (onboarding not completed) shows the first-run Setup
                     // screen; returning users with any saved server land on the Server connect
                     // screen even offline. Resolved from persisted state before the NavGraph
@@ -89,4 +110,32 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         NotificationRouteCodec.read(intent)?.let { pendingNotificationRoute.value = it }
     }
+}
+
+/** Scrollable, copyable view of a stored debug-build crash trace. */
+@Composable
+@Suppress("FunctionNaming")
+private fun CrashReportDialog(trace: String, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Last crash") },
+        text = {
+            Box(Modifier.heightIn(max = 420.dp)) {
+                Text(
+                    text = trace,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(trace))
+                    onDismiss()
+                },
+            ) { Text("Copy trace and close") }
+        },
+    )
 }

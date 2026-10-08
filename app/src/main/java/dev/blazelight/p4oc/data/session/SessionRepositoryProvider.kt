@@ -6,6 +6,7 @@ import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
+import dev.blazelight.p4oc.domain.model.isSessionScopedEvent
 import dev.blazelight.p4oc.domain.server.ScopedEvent
 import dev.blazelight.p4oc.domain.server.ServerGeneration
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
@@ -19,10 +20,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
+@Suppress("LongParameterList")
 class SessionRepositoryProvider(
     private val activeServerApiProvider: ActiveServerApiProvider,
     private val messageMapper: MessageMapper,
     private val serverConnectionRegistry: ServerConnectionRegistry,
+    private val messageStore: SessionMessageStore? = null,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val repositoryDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val json: Json = Json.Default,
@@ -66,6 +69,7 @@ class SessionRepositoryProvider(
             val repository = SessionRepositoryImpl(
                 workspaceClient,
                 messageMapper,
+                messageStore = messageStore,
                 dispatcher = repositoryDispatcher,
             )
             Entry(
@@ -123,16 +127,26 @@ class SessionRepositoryProvider(
         }
     }
 
-    /** True for a real event scoped to this exact server, generation, and workspace key. */
+    /**
+     * True for a real event scoped to this exact server, generation, and workspace key.
+     *
+     * Global workspaces span every project on the server (their hydrate loads the global session
+     * list plus each project's sessions), so a session-bearing event must reach them even when it
+     * is keyed to a project directory; otherwise a chat opened from a server-wide Sessions tab is
+     * starved of live updates and freezes until the conversation is re-entered. Directory-scoped
+     * repositories keep the exact-key rule so foreign-directory sessions never leak in.
+     */
     private fun isDeliverableEvent(
         scopedEvent: ScopedEvent,
         workspace: Workspace,
         generation: ServerGeneration,
     ): Boolean {
         if (scopedEvent.event is OpenCodeEvent.Connected) return false
-        return scopedEvent.serverRef == workspace.server &&
-            scopedEvent.generation == generation &&
-            scopedEvent.workspaceKey == workspace.key
+        val sameServerGeneration = scopedEvent.serverRef == workspace.server &&
+            scopedEvent.generation == generation
+        val exactWorkspace = scopedEvent.workspaceKey == workspace.key
+        val globalGrant = workspace.key == WorkspaceKey.Global && scopedEvent.event.isSessionScopedEvent()
+        return sameServerGeneration && (exactWorkspace || globalGrant)
     }
 
     /**
