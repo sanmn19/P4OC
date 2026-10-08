@@ -16,20 +16,18 @@ interface SessionMessageStore {
     suspend fun load(serverKey: String, workspaceKey: String, sessionId: String): CachedSessionMessages?
 
     /**
-     * Persists [messages] for later [load]. Implementations own their write dispatch (must not
-     * block the caller) and may bound or trim the stored payload. Newest saves win.
+     * Persists [entry] for later [load]. Implementations own their write dispatch and may bound
+     * or trim the stored payload. Newest saves win.
      */
-    fun save(
-        serverKey: String,
-        workspaceKey: String,
-        sessionId: String,
-        messages: List<MessageWithParts>,
-        cachedAtMs: Long,
-    )
+    fun save(serverKey: String, workspaceKey: String, sessionId: String, entry: CachedSessionMessages)
 }
 
+/** One cached session snapshot: its live message window and the remembered pagination bound. */
 @kotlinx.serialization.Serializable
 data class CachedSessionMessages(
     val messages: List<MessageWithParts>,
     val cachedAtMs: Long,
+    /** Largest history window the client had actually loaded for this session when cached. */
+    val loadedLimit: Int = 100,
+    val hasOlderMessages: Boolean = false,
 )

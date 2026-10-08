@@ -38,7 +38,12 @@ class FileSessionMessageStoreTest {
     @Test
     fun `save then load round trips the message window`() = runTest {
         val store = store()
-        store.save(serverKey, workspaceKey, "s1", listOf(message("m1"), message("m2")), 7L)
+        store.save(
+            serverKey,
+            workspaceKey,
+            "s1",
+            CachedSessionMessages(listOf(message("m1"), message("m2")), 7L),
+        )
         store.drainWrites()
 
         val loaded = store.load(serverKey, workspaceKey, "s1")
@@ -56,7 +61,12 @@ class FileSessionMessageStoreTest {
     fun `oversized window trims oldest messages until it fits`() = runTest {
         val store = store(maxSessionBytes = 1_200)
         val big = (1..40).map { message("m$it") }
-        store.save(serverKey, workspaceKey, "s1", big, 3L)
+        store.save(
+            serverKey,
+            workspaceKey,
+            "s1",
+            CachedSessionMessages(big, 3L),
+        )
         store.drainWrites()
 
         val loaded = store.load(serverKey, workspaceKey, "s1")
@@ -70,13 +80,28 @@ class FileSessionMessageStoreTest {
     @Test
     fun `store budget evicts least recently written sessions`() = runTest {
         val store = store(maxSessions = 2)
-        store.save(serverKey, workspaceKey, "s1", listOf(message("m1")), 1L)
+        store.save(
+            serverKey,
+            workspaceKey,
+            "s1",
+            CachedSessionMessages(listOf(message("m1")), 1L),
+        )
         store.drainWrites()
         Thread.sleep(2)
-        store.save(serverKey, workspaceKey, "s2", listOf(message("m2")), 1L)
+        store.save(
+            serverKey,
+            workspaceKey,
+            "s2",
+            CachedSessionMessages(listOf(message("m2")), 1L),
+        )
         store.drainWrites()
         Thread.sleep(2)
-        store.save(serverKey, workspaceKey, "s3", listOf(message("m3")), 1L)
+        store.save(
+            serverKey,
+            workspaceKey,
+            "s3",
+            CachedSessionMessages(listOf(message("m3")), 1L),
+        )
         store.drainWrites()
 
         assertTrue(store.load(serverKey, workspaceKey, "s3") != null)
@@ -111,7 +136,12 @@ class FileSessionMessageStoreTest {
                 ),
             ),
         )
-        store.save(serverKey, workspaceKey, "s1", listOf(message), 1L)
+        store.save(
+            serverKey,
+            workspaceKey,
+            "s1",
+            CachedSessionMessages(listOf(message), 1L),
+        )
         store.drainWrites()
 
         val part = store.load(serverKey, workspaceKey, "s1")?.messages?.single()?.parts?.single()

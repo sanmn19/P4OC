@@ -143,6 +143,38 @@ class SessionRepositoryMessageCacheTest {
         lease.close()
     }
 
+    @Test
+    fun `cache restores remembered window bound for recovery`() = runTest {
+        val fixture = repository(
+            testScheduler,
+            store = FakeSessionMessageStore(
+                initial = CachedSessionMessages(
+                    messages = listOf(MessageWithParts(assistantMessage("m1"), emptyList())),
+                    cachedAtMs = 42L,
+                    loadedLimit = 200,
+                    hasOlderMessages = true,
+                ),
+            ),
+        )
+        val repo = fixture.repo
+        val api = fixture.api
+
+        repo.acquireSession(sessionId)
+        advanceUntilIdle()
+
+        coEvery { api.getMessages("s1", 200, null, "/test", null) } returns (1L..200L)
+            .associate { it to assistantWrapper("m$it", createdAt = it) }.entries
+            .map { it.value }
+        repo.acceptEvent(OpenCodeEvent.Connected)
+        advanceUntilIdle()
+
+        // Recovery must reuse the bound the cache restored, not fall back to the default
+        // 100-window (which would silently drop previously loaded history).
+        coVerify(exactly = 1) { api.getMessages("s1", 200, null, "/test", null) }
+        coVerify(exactly = 0) { api.getMessages("s1", 100, null, "/test", null) }
+        assertEquals(200, repo.messages(sessionId).value.size)
+    }
+
     private fun repository(
         scheduler: kotlinx.coroutines.test.TestCoroutineScheduler,
         store: SessionMessageStore? = null,
@@ -221,10 +253,9 @@ private class FakeSessionMessageStore(
         serverKey: String,
         workspaceKey: String,
         sessionId: String,
-        messages: List<MessageWithParts>,
-        cachedAtMs: Long,
+        entry: CachedSessionMessages,
     ) {
-        saved[sessionId] = CachedSessionMessages(messages, cachedAtMs)
+        saved[sessionId] = entry
     }
 }
 
@@ -241,8 +272,7 @@ private class ThrowingSessionMessageStore : SessionMessageStore {
         serverKey: String,
         workspaceKey: String,
         sessionId: String,
-        messages: List<MessageWithParts>,
-        cachedAtMs: Long,
+        entry: CachedSessionMessages,
     ) {
         throw NotImplementedError("store broken")
     }

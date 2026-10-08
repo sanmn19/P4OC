@@ -1,6 +1,7 @@
 package dev.blazelight.p4oc
 
 import android.app.Application
+import dev.blazelight.p4oc.core.connection.ConnectionForegroundCoordinator
 import dev.blazelight.p4oc.core.log.CrashRecorder
 import dev.blazelight.p4oc.core.notification.NotificationEventObserver
 import dev.blazelight.p4oc.di.allModules
@@ -12,6 +13,7 @@ import org.koin.core.context.startKoin
 class PocketCodeApp : Application() {
 
     private val notificationEventObserver: NotificationEventObserver by inject()
+    private val connectionForegroundCoordinator: ConnectionForegroundCoordinator by inject()
 
     override fun onCreate() {
         super.onCreate()
@@ -24,5 +26,6 @@ class PocketCodeApp : Application() {
         }
 
         notificationEventObserver.start()
+        connectionForegroundCoordinator.start()
     }
 }

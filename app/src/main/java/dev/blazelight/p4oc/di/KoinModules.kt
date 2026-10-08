@@ -1,6 +1,7 @@
 package dev.blazelight.p4oc.di
 
 import androidx.lifecycle.SavedStateHandle
+import dev.blazelight.p4oc.core.connection.ConnectionForegroundCoordinator
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
 import dev.blazelight.p4oc.core.network.ConnectionManager
@@ -105,6 +106,7 @@ val networkModule = module {
             json = get(),
         )
     }
+    single { ConnectionForegroundCoordinator(androidContext(), get(), get()) }
 }
 
 val viewModelModule = module {

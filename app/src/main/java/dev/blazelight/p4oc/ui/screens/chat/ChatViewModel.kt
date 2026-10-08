@@ -212,6 +212,9 @@ class ChatViewModel constructor(
         const val TAG = "ChatViewModel"
         private const val INITIAL_HISTORY_LIMIT = 100
         private const val HISTORY_PAGE_SIZE = 100
+
+        /** Recent tail fetched on a cache-seeded re-entry instead of the full history window. */
+        private const val INCREMENTAL_TAIL_WINDOW = 25
         private const val HTTP_TOO_MANY_REQUESTS = 429
         private const val KEY_DRAFT_TEXT = "chat_draft_text"
         private const val KEY_ATTACHED_FILES = "chat_attached_files"
@@ -380,19 +383,25 @@ class ChatViewModel constructor(
             beginLoadStep("Loading session messages")
             AppLog.d(TAG, "loadMessages() called")
 
+            // Cache-seeded re-entry only needs a small recent tail to reconcile against the
+            // server; the full window is fetched exactly once on a cold entry and from the
+            // cached instant-paint then. The repo's merge keeps the fetched range authoritative
+            // (deletions repaired) while older cached history is retained for pagination.
+            val seeded = messages.value.isNotEmpty()
+            val limit = if (seeded) INCREMENTAL_TAIL_WINDOW else INITIAL_HISTORY_LIMIT
             val result = safeApiCall {
-                sessionRepository.loadMessages(SessionId(sessionId), limit = INITIAL_HISTORY_LIMIT)
+                sessionRepository.loadMessages(SessionId(sessionId), limit = limit)
             }
             endLoadStep("Loading session messages")
 
             when (result) {
                 is ApiResult.Success -> {
-                    AppLog.d(TAG, "Loaded ${messages.value.size} messages")
+                    AppLog.d(TAG, "Loaded ${result.data} messages (limit=$limit, seeded=$seeded)")
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             historyLimit = INITIAL_HISTORY_LIMIT,
-                            hasOlderMessages = result.data >= INITIAL_HISTORY_LIMIT,
+                            hasOlderMessages = result.data >= limit || it.hasOlderMessages && seeded,
                         )
                     }
                 }

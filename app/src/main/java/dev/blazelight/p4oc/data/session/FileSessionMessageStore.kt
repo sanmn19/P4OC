@@ -1,7 +1,6 @@
 package dev.blazelight.p4oc.data.session
 
 import dev.blazelight.p4oc.core.log.AppLog
-import dev.blazelight.p4oc.domain.model.MessageWithParts
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,33 +84,27 @@ class FileSessionMessageStore(
             ?.takeUnless { text -> text.length > maxSessionBytes }
             ?.let { text -> json.decodeFromString(writeSerializer, text) }
 
-    override fun save(
-        serverKey: String,
-        workspaceKey: String,
-        sessionId: String,
-        messages: List<MessageWithParts>,
-        cachedAtMs: Long,
-    ) {
-        val encoded = messages.takeIf { it.isNotEmpty() }
-            ?.let { json.encodeToString(writeSerializer, bound(it, cachedAtMs)) }
-            ?: run {
-                AppLog.w(TAG, "Session cache encode failed")
-                ""
-            }
-        if (encoded.isEmpty()) return
+    override fun save(serverKey: String, workspaceKey: String, sessionId: String, entry: CachedSessionMessages) {
+        if (entry.messages.isEmpty()) return
+        val payload = trimToBudget(entry)
+        val encoded = runCatching { json.encodeToString(writeSerializer, payload) }.getOrNull()
+        if (encoded == null) {
+            AppLog.w(TAG, "Session cache encode failed")
+            return
+        }
         writes.trySend(Write.Messages(fileFor(serverKey, workspaceKey, sessionId), encoded))
     }
 
     /** Drops oldest messages until the serialized payload fits [maxSessionBytes]. */
-    private fun bound(messages: List<MessageWithParts>, cachedAtMs: Long): CachedSessionMessages {
-        var payload = CachedSessionMessages(messages, cachedAtMs)
-        while (payload.messages.size > 1) {
-            val length = runCatching { json.encodeToString(writeSerializer, payload) }.getOrNull()?.length
-            if (length != null && length <= maxSessionBytes) return payload
-            payload = payload.copy(messages = payload.messages.drop(1))
+    private fun trimToBudget(payload: CachedSessionMessages): CachedSessionMessages {
+        var current = payload
+        while (current.messages.size > 1) {
+            val length = runCatching { json.encodeToString(writeSerializer, current) }.getOrNull()?.length
+            if (length != null && length <= maxSessionBytes) return current
+            current = current.copy(messages = current.messages.drop(1))
         }
         // A single oversized message is still stored; load treats an oversized file as a miss.
-        return payload
+        return current
     }
 
     private fun fileFor(serverKey: String, workspaceKey: String, sessionId: String): File {

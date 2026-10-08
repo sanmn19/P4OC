@@ -719,6 +719,7 @@ class SessionRepositoryImpl(
 
     private fun releaseSession(sessionId: String) {
         var releasedMessages: List<MessageWithParts>? = null
+        var releasedLoadedLimit: Int? = null
         synchronized(messageStateLock) {
             val remaining = (sessionConsumerCounts[sessionId] ?: return) - 1
             if (remaining > 0) {
@@ -730,6 +731,7 @@ class SessionRepositoryImpl(
 
             val removed = messageStates.remove(sessionId)
             releasedMessages = removed?.value
+            releasedLoadedLimit = sessionLoadedLimits.remove(sessionId)
             // Observers holding the evicted flow see the reset even though the object is detached.
             removed?.value = emptyList()
             // Bump rather than delete the revision so a fetch that captured the pre-release revision
@@ -743,7 +745,8 @@ class SessionRepositoryImpl(
                 sessionUiStates.remove(sessionId)?.value = SessionUiState()
             }
         }
-        releasedMessages?.takeIf { it.isNotEmpty() }?.let { persistCachedMessages(sessionId, it) }
+        releasedMessages?.takeIf { it.isNotEmpty() }
+            ?.let { messages -> persistCachedMessages(sessionId, messages, releasedLoadedLimit) }
     }
 
     override fun clearPermission(sessionId: SessionId, permissionId: String) {
@@ -891,8 +894,8 @@ class SessionRepositoryImpl(
         job.cancel("SessionRepository closed")
         val persistables = synchronized(messageStateLock) {
             val captured = messageStates.entries
-                .map { (id, flow) -> id to flow.value }
-                .toMap()
+                .map { (id, flow) -> Triple(id, flow.value, sessionLoadedLimits[id]) }
+                .map { (id, messages, limit) -> id to (messages to limit) }
             messageStates.clear()
             sessionRevisions.clear()
             sessionLoadedLimits.clear()
@@ -901,8 +904,8 @@ class SessionRepositoryImpl(
             sessionLeaseGenerations.clear()
             captured
         }
-        persistables.forEach { (id, messages) ->
-            if (messages.isNotEmpty()) persistCachedMessages(id, messages)
+        persistables.forEach { (id, entry) ->
+            if (entry.first.isNotEmpty()) persistCachedMessages(id, entry.first, entry.second)
         }
         synchronized(sessionUiStates) { sessionUiStates.clear() }
         synchronized(childToParentSessionIds) { childToParentSessionIds.clear() }
@@ -1188,12 +1191,22 @@ class SessionRepositoryImpl(
                 if (missing.isNotEmpty()) {
                     existing.value = (existing.value + missing).sortedBy { it.message.createdAt }
                 }
+                // A cache older than today's memory restores the same bound reconnect recovery
+                // used before the stash, so recovery and paging keep consistent window sizes.
+                if (cached.loadedLimit > (sessionLoadedLimits[sessionId] ?: 0)) {
+                    sessionLoadedLimits[sessionId] = cached.loadedLimit
+                }
             }
         }
     }
 
     /** Fire-and-forget cache write; failures are logged and never disturb the lifecycle. */
-    private fun persistCachedMessages(sessionId: String, messages: List<MessageWithParts>) {
+    private fun persistCachedMessages(
+        sessionId: String,
+        messages: List<MessageWithParts>,
+        loadedLimit: Int?,
+    ) {
+        val bound = loadedLimit ?: DEFAULT_MESSAGE_HISTORY_LIMIT
         val store = messageStore ?: return
         val cleaned = messages.map { messageWithParts ->
             messageWithParts.copy(
@@ -1202,7 +1215,13 @@ class SessionRepositoryImpl(
                 },
             )
         }
-        runCatching { store.save(cacheServerKey, cacheWorkspaceKey, sessionId, cleaned, nowMs()) }
+        val entry = CachedSessionMessages(
+            messages = cleaned,
+            cachedAtMs = nowMs(),
+            loadedLimit = bound,
+            hasOlderMessages = messages.size >= bound,
+        )
+        runCatching { store.save(cacheServerKey, cacheWorkspaceKey, sessionId, entry) }
             .onFailure { error ->
                 AppLog.w(TAG, "Session cache save failed for $sessionId: ${error.javaClass.simpleName}")
             }
