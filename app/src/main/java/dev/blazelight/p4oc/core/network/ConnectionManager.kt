@@ -221,8 +221,6 @@ class ConnectionManager constructor(
      * Lightweight SSE-only reconnect — reuses existing OkHttpClient (with auth baked in).
      * Sets state to Connecting, calls eventSource.reconnect(), and lets the existing
      * SSE state forwarding job handle the transition back to Connected or Error.
-     *
-     * Use this for background-resume recovery instead of full connect() which requires password.
      */
     fun reconnectSse(@Suppress("UNUSED_PARAMETER") reason: String = "unknown"): Boolean {
         val connection = _connection.value
@@ -276,7 +274,7 @@ class ConnectionManager constructor(
                 sseEscalationJob?.cancel()
                 sseEscalationJob = null
             }
-            is ConnectionState.Error -> scheduleSseEscalation(connection)
+            is ConnectionState.Error -> scheduleSseRecovery(connection)
             ConnectionState.Disconnected -> {
                 sseEscalationJob?.cancel()
                 sseEscalationJob = null
@@ -284,7 +282,19 @@ class ConnectionManager constructor(
         }
     }
 
-    private fun scheduleSseEscalation(connection: Connection) {
+    /**
+     * Recover from a degraded SSE stream while the app stays alive.
+     *
+     * The event-source library retries internally but eventually gives up (error cap → its
+     * error state), and the previous behavior escalated that state to a terminal Disconnected,
+     * leaving the foregrounded app with no reconnect until the next foreground/background
+     * transition (observed on-device: sends kept succeeding over REST while the conversation
+     * stopped updating entirely). After [ConnectionSettings.reconnectTimeout] seconds without a
+     * Recovered connection this now forces a fresh SSE-only reconnect generation with retries;
+     * if the network path is still down, the next error state re-arms this recovery — a bounded
+     * retry loop paced by the user's reconnect timeout.
+     */
+    private fun scheduleSseRecovery(connection: Connection) {
         sseEscalationJob?.cancel()
         sseEscalationJob = scope.launch {
             val settings = settingsDataStore.connectionSettings.first()
@@ -297,12 +307,16 @@ class ConnectionManager constructor(
             }
 
             delay(settings.reconnectTimeoutSeconds * 1000L)
-            if (_connection.value === connection && _connectionState.value is ConnectionState.Error) {
+            if (_connection.value === connection &&
+                _connectionState.value !is ConnectionState.Connected &&
+                _connectionState.value !is ConnectionState.Connecting
+            ) {
                 AppLog.w(
                     TAG,
-                    "SSE remained in Error after ${settings.reconnectTimeoutSeconds}s; escalating to Disconnected",
+                    "SSE still degraded after ${settings.reconnectTimeoutSeconds}s; forcing reconnect",
                 )
-                connection.eventSource.disconnect()
+                connection.eventSource.resetConsecutiveErrors()
+                reconnectSse(reason = "sse_recovery")
             }
         }
     }

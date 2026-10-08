@@ -722,6 +722,15 @@ class ChatViewModel constructor(
             if (!observedRetry) {
                 _uiState.update { it.copy(runNotice = RUN_STALLED_NOTICE) }
             }
+
+            // The bounded REST poll exhausted without a terminal status and with no completed
+            // assistant: on-device evidence (on a flaky relay link) showed exactly this shape
+            // when the SSE stream was dead but REST still worked — sends succeeded while live
+            // updates and status events never arrived. Force an SSE-only reconnect from the
+            // registry; the successful reconnect drives the repository's active-lease message
+            // recovery, so the transcript heals without navigation.
+            AppLog.w(TAG, "Run continued past bounded poll; forcing SSE recovery")
+            serverConnectionRegistry?.recoverSse(workspaceClient.workspace.server)
         }
     }
 
