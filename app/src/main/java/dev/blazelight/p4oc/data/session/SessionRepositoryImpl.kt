@@ -746,20 +746,26 @@ class SessionRepositoryImpl(
     private fun mergePreservingSse(sessionId: String, loaded: List<MessageWithParts>) {
         val state = messageState(sessionId)
         state.update { current ->
-            val currentById = current.associateBy { it.message.id }
-            val merged = loaded.map { loadedMessage ->
-                val currentMessage = currentById[loadedMessage.message.id]
-                if (currentMessage == null) {
-                    loadedMessage
-                } else {
-                    MessageWithParts(
-                        currentMessage.message,
-                        mergeParts(loadedMessage.parts, currentMessage.parts),
-                    )
+            if (client.streamsEphemeralContent) {
+                // v2: the racing REST fetch wins for what it carries (tool state, metadata,
+                // other parts) while streamed text that REST has not projected keeps growing.
+                V2MessageReconcile.merge(loaded, current)
+            } else {
+                val currentById = current.associateBy { it.message.id }
+                val merged = loaded.map { loadedMessage ->
+                    val currentMessage = currentById[loadedMessage.message.id]
+                    if (currentMessage == null) {
+                        loadedMessage
+                    } else {
+                        MessageWithParts(
+                            currentMessage.message,
+                            mergeParts(loadedMessage.parts, currentMessage.parts),
+                        )
+                    }
                 }
+                val loadedIds = merged.map { it.message.id }.toSet()
+                (merged + current.filter { it.message.id !in loadedIds }).sortedBy { it.message.createdAt }
             }
-            val loadedIds = merged.map { it.message.id }.toSet()
-            (merged + current.filter { it.message.id !in loadedIds }).sortedBy { it.message.createdAt }
         }
     }
 
