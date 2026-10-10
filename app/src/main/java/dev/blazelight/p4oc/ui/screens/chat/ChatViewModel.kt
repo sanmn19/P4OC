@@ -218,6 +218,8 @@ class ChatViewModel constructor(
 
         /** Tail size for the post-send reconciliation poll; keeps each poll tick small. */
         private const val SEND_RECONCILE_TAIL_WINDOW = 25
+        private const val FORCE_SEND_IDLE_ATTEMPTS = 6
+        private const val FORCE_SEND_IDLE_DELAY_MS = 500L
         private const val HTTP_TOO_MANY_REQUESTS = 429
         private const val KEY_DRAFT_TEXT = "chat_draft_text"
         private const val KEY_ATTACHED_FILES = "chat_attached_files"
@@ -1404,6 +1406,86 @@ class ChatViewModel constructor(
     }
 
     // --- Abort ---
+
+    /**
+     * "Send this queued message now": stop the active run, wait for the session to settle
+     * server-side, drop the queued row, and re-send its text as a fresh prompt.
+     *
+     * Server reality checked against OpenCode 1.18: there is no "run the queued message now"
+     * endpoint, message deletion is blocked (409) while a run is active, and abort discards the
+     * whole queue — so the queued row cannot be forced while the run lives; aborting, it must be
+     * deleted while idle and re-sent. The in-flight turn's partial output stays in the transcript
+     * (abort does not erase rows); other queued messages are dropped by the stop and can be
+     * force-sent individually afterwards.
+     */
+    fun forceSendQueued(messageId: String) {
+        val queued = messages.value.firstOrNull { it.message.id == messageId } ?: return
+        val text = queued.parts
+            .filterIsInstance<Part.Text>()
+            .filter { !it.synthetic && !it.ignored }
+            .joinToString("\n") { it.text }
+        if (text.isBlank()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSending = true, error = null) }
+            suppressStaleRunErrors = true
+            when (sessionRepository.abortSession(SessionId(sessionId)).await().toApiResult()) {
+                is ApiResult.Success -> Unit
+                is ApiResult.Error -> {
+                    suppressStaleRunErrors = false
+                    _uiState.update {
+                        it.copy(isSending = false, error = "Could not stop the current run to send it now.")
+                    }
+                    return@launch
+                }
+            }
+
+            // The abort is async on the server: wait for Idle (bounded) before touching the queue.
+            var idle = false
+            repeat(FORCE_SEND_IDLE_ATTEMPTS) {
+                val statuses = runCatching {
+                    workspaceClient.getSessionStatuses(workspaceClient.workspace.directory)
+                }.getOrNull()
+                val status = statuses?.get(sessionId)
+                if (status == null || status.type == "idle") {
+                    idle = true
+                    return@repeat
+                }
+                delay(FORCE_SEND_IDLE_DELAY_MS)
+            }
+
+            // Drop the queued row now that deletion is allowed; failure is cosmetic only.
+            if (idle) {
+                runCatching { workspaceClient.removeMessage(sessionId, messageId) }
+                    .onFailure { AppLog.w(TAG, "Queued row removal failed: ${it.javaClass.simpleName}") }
+            }
+
+            // Re-send as a fresh prompt (same request shape as a normal send).
+            val knownMessageIds = messages.value.mapTo(mutableSetOf()) { it.message.id }
+            val request = SendMessageRequest(parts = buildPartInputs(text, emptyList()))
+            when (sessionRepository.sendMessageAsync(SessionId(sessionId), request).await().toApiResult()) {
+                is ApiResult.Success -> {
+                    invalidateInitOperation()
+                    responseReconciliationJob?.cancel()
+                    responseReconciliationJob = null
+                    sessionRepository.acceptEvent(
+                        OpenCodeEvent.SessionStatusChanged(sessionId, SessionStatus.Busy)
+                    )
+                    _uiState.update { it.copy(isSending = false, isBusy = true, runNotice = null) }
+                    startResponseReconciliation(knownMessageIds)
+                }
+                is ApiResult.Error -> {
+                    suppressStaleRunErrors = false
+                    _uiState.update {
+                        it.copy(
+                            isSending = false,
+                            error = "The run stopped, but re-sending failed. Check the connection.",
+                        )
+                    }
+                }
+            }
+        }
+    }
 
     fun abortSession() {
         // Abort supersedes any command endpoint. Retire its dispatch owner immediately so a

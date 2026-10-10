@@ -223,6 +223,10 @@ class WorkspaceClient(
     suspend fun getMessages(sessionId: String, limit: Int? = null): List<MessageWrapperDto> =
         api.getMessages(sessionId, limit, before = null, directory = directory, workspace = null)
 
+    /** Removes one message row server-side; blocked (409) while the session is running. */
+    suspend fun removeMessage(sessionId: String, messageId: String): Boolean =
+        api.removeMessage(sessionId, messageId, directory, workspace = null)
+
     override suspend fun sendMessageAsync(sessionId: String, request: SendMessageRequest) {
         api.sendMessageAsync(sessionId, request, directory, workspace = null)
     }

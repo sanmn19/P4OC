@@ -688,7 +688,8 @@ fun ChatScreen(
                                         onProviderAuthRequired = onProviderAuthRequired,
                                         defaultToolWidgetState = defaultToolWidgetState,
                                         pendingPermissionsByCallId = pendingPermissionsByCallId,
-                                        onRevert = { messageId -> showRevertDialog = messageId }
+                                        onRevert = { messageId -> showRevertDialog = messageId },
+                                        onForceSendQueued = { messageId -> viewModel.forceSendQueued(messageId) },
                                     )
                                 }
                             }

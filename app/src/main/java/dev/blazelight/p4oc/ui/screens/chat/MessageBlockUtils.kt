@@ -103,7 +103,8 @@ internal fun MessageBlockView(
     onProviderAuthRequired: ((String) -> Unit)? = null,
     defaultToolWidgetState: ToolWidgetState = ToolWidgetState.COMPACT,
     pendingPermissionsByCallId: Map<String, Permission> = emptyMap(),
-    onRevert: ((String) -> Unit)? = null
+    onRevert: ((String) -> Unit)? = null,
+    onForceSendQueued: ((String) -> Unit)? = null,
 ) {
     when (block) {
         is MessageBlock.UserBlock -> {
@@ -120,6 +121,9 @@ internal fun MessageBlockView(
                     onRevert?.let { revert -> { revert(messageId) } }
                 },
                 isQueued = block.isQueued,
+                onForceSend = onForceSendQueued
+                    ?.takeIf { block.isQueued }
+                    ?.let { callback -> { callback(block.message.message.id) } },
             )
         }
         is MessageBlock.AssistantBlock -> {

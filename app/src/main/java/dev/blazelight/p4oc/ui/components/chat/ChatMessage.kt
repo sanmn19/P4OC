@@ -5,6 +5,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
@@ -58,6 +60,7 @@ fun ChatMessage(
     pendingPermissionsByCallId: Map<String, Permission> = emptyMap(),
     onRevert: (() -> Unit)? = null,
     isQueued: Boolean = false,
+    onForceSend: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val message = messageWithParts.message
@@ -67,7 +70,7 @@ fun ChatMessage(
         modifier = modifier.fillMaxWidth()
     ) {
         if (isUser) {
-            UserMessage(messageWithParts, onRevert = onRevert, isQueued = isQueued)
+            UserMessage(messageWithParts, onRevert = onRevert, isQueued = isQueued, onForceSend = onForceSend)
         } else {
             AssistantMessages(
                 messagesWithParts = listOf(messageWithParts),
@@ -123,6 +126,7 @@ private fun UserMessage(
     messageWithParts: MessageWithParts,
     onRevert: (() -> Unit)? = null,
     isQueued: Boolean = false,
+    onForceSend: (() -> Unit)? = null,
 ) {
     val theme = LocalOpenCodeTheme.current
     val clipboardManager = LocalClipboardManager.current
@@ -130,13 +134,8 @@ private fun UserMessage(
     val density = LocalDensity.current
     var revertActionWidthPx by remember { mutableIntStateOf(0) }
 
-    // Filter out synthetic text parts (system prompts, AGENTS.md content, etc.)
-    val textParts = messageWithParts.parts
-        .filterIsInstance<Part.Text>()
-        .filter { !it.synthetic && !it.ignored && it.text.isNotBlank() }
-    val fileParts = messageWithParts.parts.filterIsInstance<Part.File>()
-    if (textParts.isEmpty() && fileParts.isEmpty()) return
-    val text = textParts.joinToString("\n") { it.text }
+    val content = userMessageContent(messageWithParts) ?: return
+    val text = content.text
 
     // TUI style: flat panel surface with a "you" label — matches the design's user block.
     Box(
@@ -150,14 +149,17 @@ private fun UserMessage(
                 .background(theme.backgroundPanel)
                 .then(
                     if (text.isNotBlank()) {
-                        Modifier.combinedClickable(
-                            onClick = {},
-                            onLongClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                clipboardManager.setText(AnnotatedString(text))
-                            },
-                            onLongClickLabel = "Copy message"
-                        )
+                        // detectTapGestures(onLongPress) instead of combinedClickable: a parent
+                        // clickable consumed plain taps, which made LinkAnnotation links (bare
+                        // URLs and markdown) inside the message dead to taps.
+                        Modifier.pointerInput(text) {
+                            detectTapGestures(
+                                onLongPress = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    clipboardManager.setText(AnnotatedString(text))
+                                },
+                            )
+                        }
                     } else {
                         Modifier
                     }
@@ -170,53 +172,41 @@ private fun UserMessage(
                 0.dp
             }
 
-            Column(
+            UserMessageBody(
+                text = text,
+                fileParts = content.fileParts,
+                isQueued = isQueued,
+                onForceSend = onForceSend,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(end = revertEndInset)
-            ) {
-                Text(
-                    text = stringResource(R.string.chat_user_label),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = theme.textMuted,
-                    modifier = Modifier.padding(bottom = Spacing.xxs)
-                )
-                if (text.isNotBlank()) {
-                    StreamingMarkdown(text = text, modifier = Modifier.fillMaxWidth())
-                }
-                if (fileParts.isNotEmpty()) {
-                    if (text.isNotBlank()) Spacer(Modifier.height(Spacing.sm))
-                    ChatAttachmentList(parts = fileParts)
-                }
-
-                if (isQueued) {
-                    Text(
-                        text = stringResource(R.string.chat_queued_prefix),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = theme.background,
-                        modifier = Modifier
-                            .padding(top = Spacing.xs)
-                            .background(theme.primary, RectangleShape)
-                            .padding(horizontal = Spacing.xs, vertical = Spacing.hairline)
+                    .padding(end = revertEndInset),
+            )
+            onRevert?.let { revert ->
+                Box(modifier = Modifier.align(Alignment.BottomEnd)) {
+                    RevertAction(
+                        onWidthChange = { revertActionWidthPx = it },
+                        onClick = revert,
                     )
                 }
             }
-
-            onRevert?.let { revert ->
-                Text(
-                    text = "\u21BA ${stringResource(R.string.revert_changes)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = theme.textMuted,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .onSizeChanged { revertActionWidthPx = it.width }
-                        .clickable(role = Role.Button) { revert() }
-                )
-            }
         }
     }
+}
+
+@Composable
+private fun RevertAction(
+    onWidthChange: (Int) -> Unit,
+    onClick: () -> Unit,
+) {
+    val theme = LocalOpenCodeTheme.current
+    Text(
+        text = "\\u21BA ${stringResource(R.string.revert_changes)}",
+        style = MaterialTheme.typography.labelSmall,
+        color = theme.textMuted,
+        modifier = Modifier
+            .onSizeChanged { onWidthChange(it.width) }
+            .clickable(role = Role.Button, onClick = onClick)
+    )
 }
 
 @Composable
@@ -475,6 +465,84 @@ private sealed class PartGroupItem {
     data class Other(val part: Part) : PartGroupItem()
 }
 
+/** Synthetic-free text + attachment parts of a user message; null when the row is empty. */
+private data class UserMessageContent(val text: String, val fileParts: List<Part.File>)
+
+private fun userMessageContent(messageWithParts: MessageWithParts): UserMessageContent? {
+    val textParts = messageWithParts.parts
+        .filterIsInstance<Part.Text>()
+        .filter { !it.synthetic && !it.ignored && it.text.isNotBlank() }
+    val fileParts = messageWithParts.parts.filterIsInstance<Part.File>()
+    if (textParts.isEmpty() && fileParts.isEmpty()) return null
+    return UserMessageContent(textParts.joinToString("\n") { it.text }, fileParts)
+}
+
+/** Content of the user-message panel: the "you" label, the markdown body, attachments, state. */
+@Composable
+private fun UserMessageBody(
+    text: String,
+    fileParts: List<Part.File>,
+    isQueued: Boolean,
+    onForceSend: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = stringResource(R.string.chat_user_label),
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = LocalOpenCodeTheme.current.textMuted,
+            modifier = Modifier.padding(bottom = Spacing.xxs)
+        )
+        if (text.isNotBlank()) {
+            StreamingMarkdown(text = text, modifier = Modifier.fillMaxWidth())
+        }
+        if (fileParts.isNotEmpty()) {
+            if (text.isNotBlank()) Spacer(Modifier.height(Spacing.sm))
+            ChatAttachmentList(parts = fileParts)
+        }
+
+        if (isQueued) {
+            QueuedMessageFooter(onForceSend = onForceSend)
+        }
+    }
+}
+
+/** Row under a queued user message: the queued state chip plus the force-send affordance. */
+@Composable
+private fun QueuedMessageFooter(onForceSend: (() -> Unit)?) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = Spacing.xs),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.chat_queued_prefix),
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = theme.background,
+            modifier = Modifier
+                .background(theme.primary, RectangleShape)
+                .padding(horizontal = Spacing.xs, vertical = Spacing.hairline)
+        )
+        onForceSend?.let { forceSend ->
+            Text(
+                text = "\u25B6 ${stringResource(R.string.chat_queued_send_now)}",
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = theme.primary,
+                modifier = Modifier
+                    .clickable(role = Role.Button, onClick = forceSend)
+                    .testTag("chat_force_send")
+                    .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+            )
+        }
+    }
+}
+
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun TextPart(part: Part.Text) {
@@ -484,14 +552,16 @@ private fun TextPart(part: Part.Text) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(
-                onClick = {},
-                onLongClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    clipboardManager.setText(AnnotatedString(part.text))
-                },
-                onLongClickLabel = "Copy text"
-            )
+            // Long-press copy without consuming plain taps, so LinkAnnotation links inside the
+            // markdown open the default browser handler instead of hitting an empty onClick.
+            .pointerInput(part.text) {
+                detectTapGestures(
+                    onLongPress = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        clipboardManager.setText(AnnotatedString(part.text))
+                    },
+                )
+            }
     ) {
         StreamingMarkdown(
             text = part.text,

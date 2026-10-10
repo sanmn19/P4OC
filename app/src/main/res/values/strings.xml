@@ -291,6 +291,7 @@
     <string name="chat_disabled_uploads_pending">Uploads need attention</string>
     <string name="chat_user_label">you</string>
     <string name="chat_queued_prefix">queued</string>
+    <string name="chat_queued_send_now">send now</string>
     <string name="vcs_branch_prefix">◈</string>
     <string name="slash_command_compact_desc">Compact the conversation to reduce context size</string>
     <string name="slash_command_clear_desc">Clear the conversation history</string>
