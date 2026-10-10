@@ -20,6 +20,13 @@ interface FileRepository {
     suspend fun searchSymbols(query: String): FileOperationResult<List<Symbol>>
     suspend fun writeFile(request: FileWriteRequest): FileOperationResult<FileWriteResult>
     suspend fun createDirectory(path: String): FileOperationResult<Unit>
+
+    /**
+     * Creates a directory at an explicitly absolute server path (workspace folder creation).
+     * Distinct from the workspace-relative [createDirectory] so the file browser's relative-path
+     * safety model is untouched; the path must have been validated by the caller's draft rules.
+     */
+    suspend fun createWorkspaceDirectory(absolutePath: String): FileOperationResult<Unit>
     suspend fun renameFile(fromPath: String, toPath: String): FileOperationResult<Unit>
     suspend fun deleteFile(path: String): FileOperationResult<Unit>
     suspend fun uploadFile(request: FileUploadRequest): FileOperationResult<FileUploadResult>
@@ -145,6 +152,10 @@ class WorkspaceFileRepository internal constructor(
 
     override suspend fun createDirectory(path: String): FileOperationResult<Unit> {
         return unsupportedMutationResult(path)
+    }
+
+    override suspend fun createWorkspaceDirectory(absolutePath: String): FileOperationResult<Unit> {
+        return unsupportedMutationResult(absolutePath)
     }
 
     override suspend fun renameFile(fromPath: String, toPath: String): FileOperationResult<Unit> {
