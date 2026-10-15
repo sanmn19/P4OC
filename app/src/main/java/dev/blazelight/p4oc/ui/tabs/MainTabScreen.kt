@@ -136,6 +136,7 @@ import dev.blazelight.p4oc.ui.workspace.WorkspaceActionSubject
 import dev.blazelight.p4oc.ui.workspace.WorkspaceLabelIndex
 import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner
 import dev.blazelight.p4oc.ui.workspace.addWorkspaceSheet
+import dev.blazelight.p4oc.ui.workspace.launchRefresh
 import dev.blazelight.p4oc.ui.workspace.rememberWorkspaceActionsState
 import dev.blazelight.p4oc.ui.workspace.workspaceActionGestures
 import dev.blazelight.p4oc.ui.workspace.workspaceActionMenu
@@ -1269,7 +1270,7 @@ object MainTabScreen {
         }
         val onRefreshHome: () -> Unit = {
             distinctWorkspaceOwners.forEach { owner ->
-                deps.coroutineScope.launch { owner.sessionRepository.refresh() }
+                owner.launchRefresh(deps.coroutineScope)
             }
         }
         val workspaceLabels = rememberWorkspaceLabels(userWorkspaces, homeRepositoryStates, tabs)

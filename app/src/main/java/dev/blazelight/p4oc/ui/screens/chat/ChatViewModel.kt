@@ -244,6 +244,12 @@ class ChatViewModel constructor(
         const val TAG = "ChatViewModel"
         private const val INITIAL_HISTORY_LIMIT = 100
         private const val HISTORY_PAGE_SIZE = 100
+
+        /** Recent tail fetched on a cache-seeded re-entry instead of the full history window. */
+        private const val INCREMENTAL_TAIL_WINDOW = 25
+
+        /** Tail size for the post-send reconciliation poll; keeps each poll tick small. */
+        private const val SEND_RECONCILE_TAIL_WINDOW = 25
         private const val HTTP_TOO_MANY_REQUESTS = 429
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_CONFLICT = 409
@@ -419,19 +425,30 @@ class ChatViewModel constructor(
             beginLoadStep("Loading session messages")
             AppLog.d(TAG, "loadMessages() called")
 
+            // Restore the persistent cache deterministically BEFORE deciding the fetch: the
+            // seeding race (async restore racing this check) previously produced seeded=false on
+            // a fresh entry over an existing cache, forcing the full 100-message window refetch.
+            val seeded = runCatching {
+                sessionRepository.restoreCachedMessages(SessionId(sessionId))
+            }.getOrDefault(false)
+            // Cache-seeded re-entry only needs a small recent tail to reconcile against the
+            // server; the full window is fetched exactly once on a cold entry. The merge keeps
+            // the fetched range authoritative (deletions repaired) while older cached history
+            // is retained for pagination.
+            val limit = if (seeded) INCREMENTAL_TAIL_WINDOW else INITIAL_HISTORY_LIMIT
             val result = safeApiCall {
-                sessionRepository.loadMessages(SessionId(sessionId), limit = INITIAL_HISTORY_LIMIT)
+                sessionRepository.loadMessages(SessionId(sessionId), limit = limit)
             }
             endLoadStep("Loading session messages")
 
             when (result) {
                 is ApiResult.Success -> {
-                    AppLog.d(TAG, "Loaded ${messages.value.size} messages")
+                    AppLog.d(TAG, "Loaded ${result.data} messages (limit=$limit, seeded=$seeded)")
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             historyLimit = INITIAL_HISTORY_LIMIT,
-                            hasOlderMessages = result.data >= INITIAL_HISTORY_LIMIT,
+                            hasOlderMessages = result.data >= limit || it.hasOlderMessages && seeded,
                         )
                     }
                 }
@@ -719,10 +736,13 @@ class ChatViewModel constructor(
                 // published first bumps responseCompletedToken, whose collector cancels this very
                 // job while the recovery fetch is still in flight — the run then ends with the
                 // completed assistant reachable only via REST and no user-facing explanation.
-                // The repository's canonical active-lease, revision-safe recovery primitive is
-                // reused rather than a second message buffer or an unsafe overwrite path.
+                // The recent tail keeps this check small: the newest answer lives at the tail and
+                // the merge preserves SSE-newer content while repairing deletions in-window.
                 runCatching {
-                    sessionRepository.reconcileMessages(SessionId(sessionId))
+                    sessionRepository.loadMessages(
+                        SessionId(sessionId),
+                        limit = SEND_RECONCILE_TAIL_WINDOW,
+                    )
                 }.onFailure { error ->
                     if (error is CancellationException) throw error
                 }
@@ -752,6 +772,15 @@ class ChatViewModel constructor(
             if (!observedRetry) {
                 _uiState.update { it.copy(runNotice = RUN_STALLED_NOTICE) }
             }
+
+            // The bounded REST poll exhausted without a terminal status and with no completed
+            // assistant: on-device evidence (on a flaky relay link) showed exactly this shape
+            // when the SSE stream was dead but REST still worked — sends succeeded while live
+            // updates and status events never arrived. Force an SSE-only reconnect from the
+            // registry; the successful reconnect drives the repository's active-lease message
+            // recovery, so the transcript heals without navigation.
+            AppLog.w(TAG, "Run continued past bounded poll; forcing SSE recovery")
+            serverConnectionRegistry?.recoverSse(workspaceClient.workspace.server)
         }
     }
 

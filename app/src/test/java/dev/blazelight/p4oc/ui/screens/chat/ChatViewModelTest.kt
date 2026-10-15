@@ -660,12 +660,10 @@ class ChatViewModelTest {
 
     @Test
     fun sendMessage_reconcilesEmptyCompletedResponse_whenTerminalSseIsMissing() = runTest {
-        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returnsMany listOf(
-            emptyList(),
-            listOf(
-                userMessageDto("user-new", createdAt = 10),
-                assistantMessageDto("assistant-empty", createdAt = 11, completedAt = 12),
-            ),
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns emptyList()
+        coEvery { api.getMessages("session-1", 25, null, "/test", null) } returns listOf(
+            userMessageDto("user-new", createdAt = 10),
+            assistantMessageDto("assistant-empty", createdAt = 11, completedAt = 12),
         )
         coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
             "session-1" to SessionStatusDto(type = "idle")
@@ -695,13 +693,13 @@ class ChatViewModelTest {
         coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
             "session-1" to SessionStatusDto(type = "idle")
         )
-        coEvery { api.getMessages("session-1", 100, null, "/test", null) } coAnswers {
+        coEvery { api.getMessages("session-1", any(), null, "/test", null) } coAnswers {
             messageCalls += 1
             if (messageCalls == 1) {
                 // The ViewModel's initial history load: nothing on the server yet.
                 emptyList()
             } else {
-                // The poll's canonical reconciliation fetch: held open so the test can observe
+                // The poll's tail reconciliation fetch: held open so the test can observe
                 // whether the poll survives having already seen the REST Idle status.
                 messagesGate.await()
                 listOf(
@@ -804,11 +802,11 @@ class ChatViewModelTest {
                 dispatcher = StandardTestDispatcher(testScheduler),
             )
         )
-        coEvery { repo.reconcileMessages(SessionId("session-1")) } returns Unit
+        coEvery { repo.loadMessages(SessionId("session-1"), 25) } returns 0
         coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
             "session-1" to SessionStatusDto(type = "busy")
         )
-        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns emptyList()
+        coEvery { api.getMessages("session-1", 25, null, "/test", null) } returns emptyList()
         coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
         val vm = createViewModel(repository = repo)
         vm.updateInput("hello")
@@ -816,9 +814,9 @@ class ChatViewModelTest {
         vm.sendMessage()
         advanceUntilIdle()
 
-        // The bounded poll drives the shared repository recovery primitive directly, not a second
-        // message buffer or an unsafe overwrite path.
-        coVerify(atLeast = 1) { repo.reconcileMessages(SessionId("session-1")) }
+        // The bounded poll drives the repository's loadMessages with a small recent tail
+        // (cheap on slow links), not a second message buffer or an unsafe overwrite path.
+        coVerify(atLeast = 1) { repo.loadMessages(SessionId("session-1"), 25) }
     }
 
     @Test
@@ -1863,9 +1861,9 @@ class ChatViewModelTest {
                 )
             ),
         )
-        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returnsMany listOf(
-            listOf(existingUser),
-            listOf(existingUser, initAssistant),
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns listOf(existingUser)
+        coEvery { api.getMessages("session-1", 25, null, "/test", null) } returns listOf(
+            existingUser, initAssistant,
         )
         coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
             "session-1" to SessionStatusDto(type = "idle")
@@ -1888,7 +1886,8 @@ class ChatViewModelTest {
         )
         assertEquals("Initialized", (vm.currentMessages().last().parts.single() as Part.Text).text)
         coVerify(exactly = 1) { api.getSessionStatuses("/test", null) }
-        coVerify(exactly = 2) { api.getMessages("session-1", 100, null, "/test", null) }
+        coVerify(exactly = 1) { api.getMessages("session-1", 100, null, "/test", null) }
+        coVerify(exactly = 1) { api.getMessages("session-1", 25, null, "/test", null) }
     }
 
     @Test

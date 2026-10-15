@@ -21,6 +21,7 @@
     <ID>CyclomaticComplexMethod:FileViewerScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun FileViewerScreen( path: String, viewModel: FilesViewModel, onNavigateBack: () -&gt; Unit )</ID>
     <ID>CyclomaticComplexMethod:MainTabScreen.kt$@Composable fun MainTabScreen( onDisconnect: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
     <ID>CyclomaticComplexMethod:Mappers.kt$EventMapper$fun mapToEvent(dto: EventDataDto): OpenCodeEvent?</ID>
+    <ID>CyclomaticComplexMethod:Event.kt$fun OpenCodeEvent.isSessionScopedEvent(): Boolean</ID>
     <ID>CyclomaticComplexMethod:Mappers.kt$MessageMapper$fun mapToDomain(dto: MessageInfoDto): Message</ID>
     <ID>CyclomaticComplexMethod:Mappers.kt$PartMapper$fun mapToDomain(dto: PartDto): Part</ID>
     <ID>CyclomaticComplexMethod:Mappers.kt$PartMapper$private fun mapFileSourceToDomain(source: JsonObject): FilePartSource?</ID>

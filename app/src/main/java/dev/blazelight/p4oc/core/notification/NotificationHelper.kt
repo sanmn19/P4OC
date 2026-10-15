@@ -47,40 +47,81 @@ class NotificationHelper constructor(
     companion object {
         const val CHANNEL_ID = "user_input_required"
         const val COMPLETION_CHANNEL_ID = "assistant_completed"
+        const val LIVE_CONNECTION_CHANNEL_ID = "live_connection"
 
-        private const val PERMISSION_NOTIFICATION_ID = 0x40000000
-        private const val QUESTION_NOTIFICATION_ID = 0x20000000
-        private const val COMPLETION_NOTIFICATION_ID = 0x10000000
+        const val PERMISSION_NOTIFICATION_ID = 0x40000000
+        const val QUESTION_NOTIFICATION_ID = 0x20000000
+        const val COMPLETION_NOTIFICATION_ID = 0x10000000
+        const val LIVE_CONNECTION_NOTIFICATION_ID = 0x7FFFFFFE
+
+        /** Idempotent channel creation, shared by NotificationHelper instances and the FGS. */
+        fun ensureChannels(context: Context) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val notificationManager = context.getSystemService(NotificationManager::class.java)
+                notificationManager.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_ID,
+                        context.getString(R.string.notification_channel_user_input_name),
+                        NotificationManager.IMPORTANCE_HIGH,
+                    ).apply {
+                        description = context.getString(R.string.notification_channel_user_input_desc)
+                        enableVibration(true)
+                    }
+                )
+                notificationManager.createNotificationChannel(
+                    NotificationChannel(
+                        COMPLETION_CHANNEL_ID,
+                        context.getString(R.string.notification_channel_completion_name),
+                        NotificationManager.IMPORTANCE_DEFAULT,
+                    ).apply {
+                        description = context.getString(R.string.notification_channel_completion_desc)
+                        enableVibration(false)
+                        setSound(null, null)
+                    }
+                )
+                notificationManager.createNotificationChannel(
+                    NotificationChannel(
+                        LIVE_CONNECTION_CHANNEL_ID,
+                        context.getString(R.string.live_connection_channel_name),
+                        NotificationManager.IMPORTANCE_LOW,
+                    ).apply {
+                        description = context.getString(R.string.live_connection_channel_desc)
+                        enableVibration(false)
+                        setSound(null, null)
+                    }
+                )
+            }
+        }
+
+        /**
+         * The persistent "live connection" notification body for the foreground service that
+         * keeps the SSE stream flowing while the app is backgrounded. LOW importance: silent,
+         * docks in the tray's ongoing section. No content intent: minimizing/starting the app is
+         * the everyday gesture; an extra tap target would duplicate the launcher.
+         */
+        fun liveConnectionNotification(context: Context, serverLabel: String?): android.app.Notification =
+            NotificationCompat.Builder(context, LIVE_CONNECTION_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle(context.getString(R.string.live_connection_notification_title))
+                .setContentText(
+                    boundedNotificationText(
+                        serverLabel,
+                        context.getString(R.string.live_connection_notification_fallback),
+                    )
+                )
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(true)
+                .setShowWhen(false)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .build()
+
+        fun dismissLiveConnection(context: Context) {
+            NotificationManagerCompat.from(context).cancel("live_connection", LIVE_CONNECTION_NOTIFICATION_ID)
+        }
     }
 
     init {
-        createNotificationChannel()
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val inputChannel = NotificationChannel(
-                CHANNEL_ID,
-                context.getString(R.string.notification_channel_user_input_name),
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = context.getString(R.string.notification_channel_user_input_desc)
-                enableVibration(true)
-            }
-            val completionChannel = NotificationChannel(
-                COMPLETION_CHANNEL_ID,
-                context.getString(R.string.notification_channel_completion_name),
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = context.getString(R.string.notification_channel_completion_desc)
-                enableVibration(false)
-                setSound(null, null)
-            }
-
-            val notificationManager = context.getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(inputChannel)
-            notificationManager.createNotificationChannel(completionChannel)
-        }
+        ensureChannels(context)
     }
 
     fun showPermissionNotification(

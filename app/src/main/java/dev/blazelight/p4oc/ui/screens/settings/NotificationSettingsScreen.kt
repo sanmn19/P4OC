@@ -69,10 +69,21 @@ class NotificationSettingsViewModel constructor(
     private val _savedServers = MutableStateFlow<List<SavedServer>>(emptyList())
     val savedServers: StateFlow<List<SavedServer>> = _savedServers.asStateFlow()
 
+    private val _connectionSettings = MutableStateFlow(
+        dev.blazelight.p4oc.core.datastore.ConnectionSettings()
+    )
+    val connectionSettings: StateFlow<dev.blazelight.p4oc.core.datastore.ConnectionSettings> =
+        _connectionSettings.asStateFlow()
+
     init {
         viewModelScope.launch {
             settingsDataStore.notificationSettings.collect { saved ->
                 _settings.value = saved
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.connectionSettings.collect { saved ->
+                _connectionSettings.value = saved
             }
         }
         viewModelScope.launch {
@@ -113,6 +124,12 @@ class NotificationSettingsViewModel constructor(
         viewModelScope.launch { settingsDataStore.updateNotificationSettings(new) }
     }
 
+    fun setKeepLiveInBackground(keep: Boolean) {
+        val new = _connectionSettings.value.copy(keepLiveInBackground = keep)
+        _connectionSettings.value = new
+        viewModelScope.launch { settingsDataStore.updateConnectionSettings(new) }
+    }
+
     fun setVibrationPattern(pattern: VibrationPattern) {
         val new = _settings.value.copy(vibrationPattern = pattern)
         _settings.value = new
@@ -131,6 +148,7 @@ fun NotificationSettingsScreen(
     onNavigateBack: () -> Unit
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val connectionSettings by viewModel.connectionSettings.collectAsStateWithLifecycle()
     val savedServers by viewModel.savedServers.collectAsStateWithLifecycle()
     val theme = LocalOpenCodeTheme.current
     val context = LocalContext.current
@@ -252,6 +270,16 @@ fun NotificationSettingsScreen(
                 onCheckedChange = { viewModel.toggleNotifyOnCompletion() },
                 enabled = settings.enabled,
                 testTag = "notify_on_completion_switch"
+            )
+
+            NotificationSwitch(
+                title = stringResource(R.string.live_connection_keep_alive),
+                subtitle = stringResource(R.string.live_connection_keep_alive_desc),
+                icon = Icons.Default.Sync,
+                checked = connectionSettings.keepLiveInBackground,
+                onCheckedChange = { keep -> viewModel.setKeepLiveInBackground(keep) },
+                enabled = true,
+                testTag = "live_connection_switch"
             )
 
             VibrationPatternRow(

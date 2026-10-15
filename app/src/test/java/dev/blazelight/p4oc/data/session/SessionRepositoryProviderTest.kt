@@ -402,6 +402,60 @@ class SessionRepositoryProviderTest {
     }
 
     @Test
+    fun `session-bearing events from other directories reach a global workspace repository`() = runTest {
+        val harness = harness()
+        val globalWorkspace = Workspace(server = server, directory = null)
+        val provider = harness.provider(
+            scopedEvents = flowOf(
+                ScopedEvent(
+                    serverRef = server,
+                    generation = generation,
+                    workspaceKey = WorkspaceKey.Directory("/some-project"),
+                    event = OpenCodeEvent.MessageUpdated(assistantMessage("m1")),
+                ),
+            ),
+            dispatcher = StandardTestDispatcher(testScheduler),
+        )
+
+        val lease = provider.acquire(globalWorkspace, generation)
+        testScheduler.advanceUntilIdle()
+
+        // A chat opened in a server-wide (Global) workspace is fed by a repository whose hydrate
+        // spans every project. Session-bearing events must reach it regardless of their directory
+        // key, otherwise a send never refreshes the open conversation until re-entry.
+        assertEquals(
+            listOf("m1"),
+            lease.repository.messages(SessionId("s1")).value.map { it.message.id },
+        )
+    }
+
+    @Test
+    fun `session-bearing events for another directory are not delivered to a directory workspace`() =
+        runTest {
+            val harness = harness()
+            val provider = harness.provider(
+                scopedEvents = flowOf(
+                    ScopedEvent(
+                        serverRef = server,
+                        generation = generation,
+                        workspaceKey = WorkspaceKey.Directory("/other-project"),
+                        event = OpenCodeEvent.MessageUpdated(assistantMessage("m1")),
+                    ),
+                ),
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
+
+            val lease = provider.acquire(workspace, generation)
+            testScheduler.advanceUntilIdle()
+
+            // Directory-scoped repositories stay scoped: foreign-directory sessions must not leak in.
+            assertEquals(
+                emptyList<MessageWithParts>(),
+                lease.repository.messages(SessionId("s1")).value,
+            )
+        }
+
+    @Test
     fun `throwing event does not permanently kill workspace event collection`() = runTest {
         val bad = mockk<Message> { every { sessionID } throws RuntimeException("boom") }
         val harness = harness()

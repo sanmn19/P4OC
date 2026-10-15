@@ -42,6 +42,7 @@ import kotlin.coroutines.coroutineContext
  * and owns live [ConnectionManager] instances.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("TooManyFunctions")
 class ServerConnectionRegistry constructor(
     private val settingsDataStore: SettingsDataStore,
     private val connectionManagerFactory: (ServerConfig, () -> ServerGeneration) -> ConnectionManager,
@@ -265,6 +266,15 @@ class ServerConnectionRegistry constructor(
             if (manager != null) manager.disconnect()
         }
     }
+
+    /**
+     * Best-effort SSE self-heal for one connected server: forces a fresh SSE-only reconnect
+     * generation. The event-source library's internal retries give up at its error cap, and the
+     * foregrounded app used to stay eventless until the next foreground/background transition.
+     * Returns false when no live manager owns this endpoint (nothing to recover).
+     */
+    fun recoverSse(serverRef: ServerRef): Boolean =
+        managers[serverRef.endpointKey]?.reconnectSse(reason = "chat_stall_recovery") ?: false
 
     /**
      * Applies a server-global disposal only to the connection generation that emitted it.

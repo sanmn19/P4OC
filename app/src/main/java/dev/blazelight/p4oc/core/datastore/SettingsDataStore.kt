@@ -224,6 +224,7 @@ class SettingsDataStore constructor(
         // Connection settings keys
         private val KEY_AUTO_RECONNECT = booleanPreferencesKey("auto_reconnect")
         private val KEY_RECONNECT_TIMEOUT_SECONDS = intPreferencesKey("reconnect_timeout_seconds")
+        private val KEY_KEEP_LIVE_IN_BACKGROUND = booleanPreferencesKey("keep_live_in_background")
 
         const val DEFAULT_LOCAL_URL = "http://localhost:4096"
         const val THEME_SYSTEM = "system"
@@ -764,7 +765,8 @@ class SettingsDataStore constructor(
     val connectionSettings: Flow<ConnectionSettings> = context.dataStore.data.map { prefs ->
         ConnectionSettings(
             autoReconnect = prefs[KEY_AUTO_RECONNECT] ?: true,
-            reconnectTimeoutSeconds = prefs[KEY_RECONNECT_TIMEOUT_SECONDS] ?: 45
+            reconnectTimeoutSeconds = prefs[KEY_RECONNECT_TIMEOUT_SECONDS] ?: 45,
+            keepLiveInBackground = prefs[KEY_KEEP_LIVE_IN_BACKGROUND] ?: true,
         )
     }
 
@@ -772,6 +774,7 @@ class SettingsDataStore constructor(
         context.dataStore.edit { prefs ->
             prefs[KEY_AUTO_RECONNECT] = settings.autoReconnect
             prefs[KEY_RECONNECT_TIMEOUT_SECONDS] = settings.reconnectTimeoutSeconds
+            prefs[KEY_KEEP_LIVE_IN_BACKGROUND] = settings.keepLiveInBackground
         }
     }
 
@@ -1219,5 +1222,6 @@ fun String.toVibrationPattern(): VibrationPattern = VibrationPattern.entries
 
 data class ConnectionSettings(
     val autoReconnect: Boolean = true,
-    val reconnectTimeoutSeconds: Int = 45
+    val reconnectTimeoutSeconds: Int = 45,
+    val keepLiveInBackground: Boolean = true
 )
