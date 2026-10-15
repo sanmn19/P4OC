@@ -58,6 +58,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.coroutineContext
 
+@Suppress("LongParameterList") // two optional collaborators (store + forced roots) + test knobs
 class SessionRepositoryImpl(
     private val client: SessionWorkspaceClient,
     private val messageMapper: MessageMapper? = null,
@@ -1553,17 +1554,6 @@ class SessionRepositoryImpl(
                 )
             }
         }
-    }
-
-    /**
-     * v2 assistant text streams only over SSE and the REST projection can lag it, so a reconcile
-     * that ran mid-turn may have missed the final content and tool state, and nothing else repairs
-     * it once the turn ends. One trailing reconcile after the session settles fills it in for
-     * actively leased sessions. v1 keeps receiving authoritative message/part events instead.
-     */
-    private fun requestPostIdleReconcile(sessionId: String) {
-        if (!client.streamsEphemeralContent) return
-        if (synchronized(messageStateLock) { canRecover(sessionId) }) requestMessageEventRefresh(sessionId)
     }
 
     private fun mergeParts(loaded: List<Part>, current: List<Part>): List<Part> {

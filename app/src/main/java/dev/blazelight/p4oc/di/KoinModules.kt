@@ -102,7 +102,16 @@ val networkModule = module {
         activeServerApiProvider(get())
     }
     single<UserWorkspaceRootsSource> { SettingsUserWorkspaceRootsSource(get()) }
-    single { SessionRepositoryProvider(get(), get(), get(), userWorkspaceRoots = get(), messageStore = get(), json = get()) }
+    single {
+        SessionRepositoryProvider(
+            get(),
+            get(),
+            get(),
+            userWorkspaceRoots = get(),
+            messageStore = get(),
+            json = get(),
+        )
+    }
     single<SessionMessageStore> {
         FileSessionMessageStore(
             rootDir = File(androidContext().filesDir, "session_message_cache"),
