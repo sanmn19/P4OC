@@ -187,6 +187,7 @@ private fun WorkspaceManagementHost.launchEdit(edit: suspend () -> Unit) {
 internal fun WorkspaceManagementHost.addWorkspaceDependencies(
     browserFor: (ServerRef) -> ServerDirectoryBrowser?,
     browseStart: (ServerRef) -> ServerPath?,
+    createFolder: suspend (ServerRef, ServerPath) -> String? = { _, _ -> null },
     nowMs: () -> Long = System::currentTimeMillis,
 ): AddWorkspaceDependencies = AddWorkspaceDependencies(
     browserFor = browserFor,
@@ -194,6 +195,7 @@ internal fun WorkspaceManagementHost.addWorkspaceDependencies(
     generatedNameFor = { server, path -> labels().directoryLabel(server.endpointKey, path.value).generated },
     browseStartFor = browseStart,
     addRoot = { server, path, alias -> addRoot(server, path, alias, nowMs()) },
+    createFolder = createFolder,
 )
 
 @Suppress("TooGenericExceptionCaught") // Any storage failure becomes the sheet's readable failure state.

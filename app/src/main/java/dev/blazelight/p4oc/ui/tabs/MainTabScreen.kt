@@ -1636,6 +1636,15 @@ private fun addWorkspaceSheetHost(params: MainTabContentParams) {
                 ?.let { owner -> workspaceClientDirectoryBrowser(owner.workspaceClient) }
         },
         browseStart = { server -> browseStartFor(server.endpointKey, params.homeRepositoryStates, params.tabs) },
+          createFolder = { server, path ->
+            val owner = params.tabMaps.workspaceOwners["home:${server.endpointKey}"]
+                ?: return@addWorkspaceDependencies "The server is not connected; reconnect and try again."
+            when (val result = owner.fileRepository.createWorkspaceDirectory(path.value)) {
+                is FileOperationResult.Ok -> null
+                is FileOperationResult.Failed -> result.message
+                is FileOperationResult.Conflict -> result.message
+            }
+        },
     )
     addWorkspaceSheet(
         request = launch.request,
