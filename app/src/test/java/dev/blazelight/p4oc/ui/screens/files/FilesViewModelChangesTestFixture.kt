@@ -90,6 +90,8 @@ private class ChangesFakeFileRepository : FileRepository {
 
     override suspend fun createDirectory(path: String): FileOperationResult<Unit> =
         FileOperationResult.Ok(Unit)
+    override suspend fun createWorkspaceDirectory(absolutePath: String): FileOperationResult<Unit> =
+        FileOperationResult.Failed("unsupported in test")
 
     override suspend fun renameFile(fromPath: String, toPath: String): FileOperationResult<Unit> =
         FileOperationResult.Ok(Unit)

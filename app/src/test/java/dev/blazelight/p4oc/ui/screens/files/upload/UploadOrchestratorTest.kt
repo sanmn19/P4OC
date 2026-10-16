@@ -358,6 +358,8 @@ private class FakeFileRepository(
     override suspend fun writeFile(request: FileWriteRequest) =
         FileOperationResult.Ok(FileWriteResult(path = request.path, hash = null))
     override suspend fun createDirectory(path: String) = FileOperationResult.Ok(Unit)
+    override suspend fun createWorkspaceDirectory(absolutePath: String): FileOperationResult<Unit> =
+        FileOperationResult.Failed("unsupported in test")
     override suspend fun renameFile(fromPath: String, toPath: String) = FileOperationResult.Ok(Unit)
     override suspend fun deleteFile(path: String) = FileOperationResult.Ok(Unit)
     override suspend fun uploadFile(request: FileUploadRequest): FileOperationResult<FileUploadResult> {
@@ -390,6 +392,8 @@ private class GatedFileRepository : FileRepository {
     override suspend fun writeFile(request: FileWriteRequest) =
         FileOperationResult.Ok(FileWriteResult(path = request.path, hash = null))
     override suspend fun createDirectory(path: String) = FileOperationResult.Ok(Unit)
+    override suspend fun createWorkspaceDirectory(absolutePath: String): FileOperationResult<Unit> =
+        FileOperationResult.Failed("unsupported in test")
     override suspend fun renameFile(fromPath: String, toPath: String) = FileOperationResult.Ok(Unit)
     override suspend fun deleteFile(path: String) = FileOperationResult.Ok(Unit)
     override suspend fun capabilities() = FileCapabilities(canUpload = true)

@@ -4,10 +4,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -77,6 +79,14 @@ class AddWorkspaceDependencies(
     val generatedNameFor: (ServerRef, ServerPath) -> String,
     val browseStartFor: (ServerRef) -> ServerPath?,
     val addRoot: suspend (ServerRef, ServerPath, String?) -> AddRootOutcome,
+    /**
+     * Server-side folder creation for a validated-but-missing absolute path (workspace root
+     * creation, e.g. ofish `mkdir -p`). Returns null on success or a human-readable problem.
+     * Null-capability servers (e.g. browse-only) report themselves through the returned text.
+     */
+    val createFolder: suspend (ServerRef, ServerPath) -> String? = { _, _ ->
+        "Folder creation is not available on this server"
+    },
 )
 
 private data class AddWorkspaceValidationRequest(
@@ -112,6 +122,10 @@ internal class AddWorkspaceState(val request: AddWorkspaceRequest) {
         private set
     var allowUnverified by mutableStateOf(false)
         private set
+    var isCreating by mutableStateOf(false)
+        private set
+    var createProblem by mutableStateOf<String?>(null)
+        private set
 
     private var browseJob: Job? = null
     private var validationJob: Job? = null
@@ -140,6 +154,37 @@ internal class AddWorkspaceState(val request: AddWorkspaceRequest) {
     fun updateName(value: String) {
         nameText = value.take(MAX_WORKSPACE_ALIAS_LENGTH)
     }
+
+    /** The typed path's parent checks out and only the leaf folder is missing on disk. */
+    fun canCreateMissingFolder(): Boolean =
+        !isCreating && pathProblem is WorkspacePathProblem.Missing &&
+            ServerPath.parseUserInput(pathText) is ServerPathParse.Valid
+
+    internal fun createMissingFolder(env: AddWorkspaceEnv, option: AddWorkspaceServerOption) {
+        if (!canCreateMissingFolder()) return
+        val parsed = (ServerPath.parseUserInput(pathText) as ServerPathParse.Valid).path
+        createProblem = null
+        isCreating = true
+        env.scope.launch {
+            val problem = runCatching { env.dependencies.createFolder(option.server, parsed) }
+                .getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    error.message ?: error.javaClass.simpleName
+                }
+            if (!isCurrentForCreate(option)) return@launch
+            isCreating = false
+            if (problem == null) {
+                createProblem = null
+                // The folder now exists: re-validate (becomes verified) and add the root.
+                env.submit(state = this@AddWorkspaceState, option)
+            } else {
+                createProblem = problem
+            }
+        }
+    }
+
+    private fun isCurrentForCreate(option: AddWorkspaceServerOption): Boolean =
+        selectedEndpointKey == option.server.endpointKey
 
     fun startInitialBrowse(
         scope: CoroutineScope,
@@ -258,6 +303,7 @@ internal class AddWorkspaceState(val request: AddWorkspaceRequest) {
         pathProblem = null
         addOutcome = null
         allowUnverified = false
+        createProblem = null
     }
 
     private fun initialEndpointKey(request: AddWorkspaceRequest): String? =
@@ -296,7 +342,7 @@ fun addWorkspaceSheet(
 }
 
 /** Collaborators shared by the sheet's composables. */
-private class AddWorkspaceEnv(
+internal class AddWorkspaceEnv(
     val dependencies: AddWorkspaceDependencies,
     val scope: CoroutineScope,
     val onDismiss: () -> Unit,
@@ -304,6 +350,10 @@ private class AddWorkspaceEnv(
 ) {
     fun browse(state: AddWorkspaceState, server: ServerRef, path: ServerPath) {
         state.startBrowse(scope, server, path, dependencies)
+    }
+
+    fun createMissingFolder(state: AddWorkspaceState, option: AddWorkspaceServerOption) {
+        state.createMissingFolder(env = this, option)
     }
 
     fun submit(state: AddWorkspaceState, option: AddWorkspaceServerOption) {
@@ -400,6 +450,7 @@ private fun addWorkspacePathEditor(
     val visibleError = errorText?.takeUnless {
         state.pathProblem == WorkspacePathProblem.Offline && state.browseResult == BrowseResult.Offline
     }
+    val canCreateMissing = state.canCreateMissingFolder()
     val onGo = { env.submit(state, option) }
     OutlinedTextField(
         value = state.pathText,
@@ -425,6 +476,41 @@ private fun addWorkspacePathEditor(
         Text(
             visibleError,
             color = if (isWarning) theme.textMuted else theme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    addWorkspaceCreateAction(state, option, env, canCreateMissing)
+}
+
+@Composable
+private fun addWorkspaceCreateAction(
+    state: AddWorkspaceState,
+    option: AddWorkspaceServerOption,
+    env: AddWorkspaceEnv,
+    canCreateMissing: Boolean,
+) {
+    val theme = LocalOpenCodeTheme.current
+    if (canCreateMissing) {
+        Text(
+            stringResource(R.string.add_workspace_create_hint),
+            color = theme.textMuted,
+        )
+        TuiButton(
+            onClick = { env.createMissingFolder(state, option) },
+            enabled = !state.isCreating && !state.isValidating,
+            modifier = Modifier.testTag("add_workspace_create_folder"),
+        ) {
+            if (state.isCreating) {
+                CircularProgressIndicator(modifier = Modifier.size(Sizing.iconSm))
+                Spacer(Modifier.width(Spacing.sm))
+            }
+            Text(stringResource(R.string.add_workspace_create_folder))
+        }
+    }
+    state.createProblem?.let { problem ->
+        Text(
+            problem,
+            color = theme.error,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }

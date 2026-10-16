@@ -48,6 +48,9 @@ internal class OfishFileRepository(
 
     override suspend fun createDirectory(path: String): FileOperationResult<Unit> = mutationClient.createDirectory(path)
 
+    override suspend fun createWorkspaceDirectory(absolutePath: String): FileOperationResult<Unit> =
+        mutationClient.createDirectoryAbsolute(absolutePath)
+
     override suspend fun renameFile(fromPath: String, toPath: String): FileOperationResult<Unit> =
         mutationClient.renameFile(fromPath, toPath)
 

@@ -1153,6 +1153,8 @@
     <string name="add_workspace_offline">Server offline. Reconnect to add a workspace.</string>
     <string name="add_workspace_path_blank">Enter a folder path.</string>
     <string name="add_workspace_path_absolute">Use a full path starting with / or a drive letter (C:\\).</string>
+    <string name="add_workspace_create_hint">That folder does not exist on the server yet.</string>
+    <string name="add_workspace_create_folder">Create folder on server</string>
     <string name="add_workspace_path_dots">Remove . and .. from the path.</string>
     <string name="add_workspace_path_control">The path contains characters that can\'t be used.</string>
     <string name="add_workspace_path_duplicate">Already a workspace on this server.</string>

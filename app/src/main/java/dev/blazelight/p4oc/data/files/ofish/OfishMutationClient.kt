@@ -33,7 +33,7 @@ internal class FixedUploadChunkBytesProvider(
     override suspend fun get(capabilities: OfishCapabilities): Int = bytes
 }
 
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "TooManyFunctions")
 internal class OfishMutationClient(
     private val client: OfishWorkspaceClient,
     private val sessionFactory: OfishSessionFactory,
@@ -127,6 +127,21 @@ internal class OfishMutationClient(
     @Suppress("ReturnCount")
     suspend fun createDirectory(path: String): FileOperationResult<Unit> {
         val normalizedPath = normalizedPathOrFailure(path) ?: return mutationPathFailure(path)
+        availableCapabilitiesOrFailure()?.let { return it }
+
+        return runCatching {
+            sessionFactory.withSession(OPERATION_MKDIR) { session ->
+                execute(session.id, commandBuilder.mkdir(normalizedPath), MARKER_MKDIR).toCreateDirectoryResult()
+            }
+        }.getOrElse { error -> FileOperationResult.Failed("OFISH folder creation failed", error) }
+    }
+
+    /** Workspace-folder creation: absolute path variant of [createDirectory]. */
+    @Suppress("ReturnCount")
+    suspend fun createDirectoryAbsolute(absolutePath: String): FileOperationResult<Unit> {
+        val normalizedPath = normalizeAbsoluteMutationPath(absolutePath).getOrElse { error ->
+            return FileOperationResult.Failed(error.message ?: INVALID_PATH_MESSAGE, error)
+        }
         availableCapabilitiesOrFailure()?.let { return it }
 
         return runCatching {
@@ -329,6 +344,9 @@ internal class OfishMutationClient(
     }
 
     private fun normalizeMutationPath(path: String): Result<String> = FilePathValidator.normalizeForMutation(path)
+
+    private fun normalizeAbsoluteMutationPath(path: String): Result<String> =
+        FilePathValidator.normalizeForAbsoluteMutation(path)
 
     private fun InputStream.readChunk(maxBytes: Int): ByteArray {
         val buffer = ByteArray(maxBytes)

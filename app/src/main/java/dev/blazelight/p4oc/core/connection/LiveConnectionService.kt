@@ -28,19 +28,30 @@ class LiveConnectionService : Service() {
         val serverLabel = intent?.getStringExtra(EXTRA_SERVER_LABEL)
         NotificationHelper.ensureChannels(this)
         val notification = NotificationHelper.liveConnectionNotification(this, serverLabel)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NotificationHelper.LIVE_CONNECTION_NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            startForeground(NotificationHelper.LIVE_CONNECTION_NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NotificationHelper.LIVE_CONNECTION_NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(NotificationHelper.LIVE_CONNECTION_NOTIFICATION_ID, notification)
+            }
+        } catch (_: IllegalStateException) {
+            // ForegroundServiceStartNotAllowedException (an IllegalStateException): observed when
+            // START_STICKY resurrected this service in a fully-backgrounded process (null intent)
+            // after the OS killed the app — no window exists to grant elevation, and the uncaught
+            // throw crashed the app. A sessionless background resurrection serves no purpose
+            // anyway: end quietly; the coordinator starts the service fresh on the next real
+            // foreground->background transition.
+            stopSelf()
+            return START_NOT_STICKY
         }
-        // The event stream lives in the app process; staying sticky keeps the process elevated
-        // after the system retries restarts (process death with a live connection is the exact
-        // scenario the user wants to avoid).
-        return START_STICKY
+        // Not sticky: the service's purpose is a live connection for an app session in use. If
+        // the process dies the session is gone; a silent background restart would either crash
+        // or idle-float with a stale tray entry. The coordinator owns the lifecycle instead.
+        return START_NOT_STICKY
     }
 
     companion object {
