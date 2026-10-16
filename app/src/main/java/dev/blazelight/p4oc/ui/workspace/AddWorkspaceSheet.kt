@@ -4,12 +4,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -160,7 +160,7 @@ internal class AddWorkspaceState(val request: AddWorkspaceRequest) {
         !isCreating && pathProblem is WorkspacePathProblem.Missing &&
             ServerPath.parseUserInput(pathText) is ServerPathParse.Valid
 
-    fun createMissingFolder(env: AddWorkspaceEnv, option: AddWorkspaceServerOption) {
+    internal fun createMissingFolder(env: AddWorkspaceEnv, option: AddWorkspaceServerOption) {
         if (!canCreateMissingFolder()) return
         val parsed = (ServerPath.parseUserInput(pathText) as ServerPathParse.Valid).path
         createProblem = null
@@ -342,7 +342,7 @@ fun addWorkspaceSheet(
 }
 
 /** Collaborators shared by the sheet's composables. */
-private class AddWorkspaceEnv(
+internal class AddWorkspaceEnv(
     val dependencies: AddWorkspaceDependencies,
     val scope: CoroutineScope,
     val onDismiss: () -> Unit,
@@ -479,6 +479,17 @@ private fun addWorkspacePathEditor(
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
+    addWorkspaceCreateAction(state, option, env, canCreateMissing)
+}
+
+@Composable
+private fun addWorkspaceCreateAction(
+    state: AddWorkspaceState,
+    option: AddWorkspaceServerOption,
+    env: AddWorkspaceEnv,
+    canCreateMissing: Boolean,
+) {
+    val theme = LocalOpenCodeTheme.current
     if (canCreateMissing) {
         Text(
             stringResource(R.string.add_workspace_create_hint),

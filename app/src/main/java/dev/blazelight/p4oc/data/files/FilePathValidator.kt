@@ -11,6 +11,7 @@ internal object FilePathValidator {
      * (no absolute escape); this one inverts that rule with its own traversal/scheme guards,
      * mirroring the picker's draft validation (also enforced client-side at the typed input).
      */
+    @Suppress("CyclomaticComplexMethod", "ReturnCount") // a flat guard matrix reads clearer than nested predicates
     fun normalizeForAbsoluteMutation(path: String): Result<String> {
         if (path.indexOf('\u0000') >= 0) {
             return invalid("NUL characters are not allowed in file paths")

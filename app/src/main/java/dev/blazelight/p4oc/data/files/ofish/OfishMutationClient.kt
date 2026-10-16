@@ -33,7 +33,7 @@ internal class FixedUploadChunkBytesProvider(
     override suspend fun get(capabilities: OfishCapabilities): Int = bytes
 }
 
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "TooManyFunctions")
 internal class OfishMutationClient(
     private val client: OfishWorkspaceClient,
     private val sessionFactory: OfishSessionFactory,
@@ -137,6 +137,7 @@ internal class OfishMutationClient(
     }
 
     /** Workspace-folder creation: absolute path variant of [createDirectory]. */
+    @Suppress("ReturnCount")
     suspend fun createDirectoryAbsolute(absolutePath: String): FileOperationResult<Unit> {
         val normalizedPath = normalizeAbsoluteMutationPath(absolutePath).getOrElse { error ->
             return FileOperationResult.Failed(error.message ?: INVALID_PATH_MESSAGE, error)

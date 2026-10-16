@@ -13,6 +13,7 @@ import dev.blazelight.p4oc.domain.model.FileNode
 import dev.blazelight.p4oc.domain.model.Symbol
 import java.io.InputStream
 
+@Suppress("TooManyFunctions")
 interface FileRepository {
     suspend fun listFiles(path: String): FileOperationResult<FileList>
     suspend fun readFile(path: String): FileOperationResult<FileContent>

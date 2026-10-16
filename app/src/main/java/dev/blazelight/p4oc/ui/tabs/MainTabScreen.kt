@@ -98,6 +98,7 @@ import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.safeApiCall
 import dev.blazelight.p4oc.core.network.toServerRef
 import dev.blazelight.p4oc.core.notification.NotificationRoute
+import dev.blazelight.p4oc.data.files.FileOperationResult
 import dev.blazelight.p4oc.data.remote.dto.CreatePtyRequest
 import dev.blazelight.p4oc.data.remote.dto.CreateSessionRequest
 import dev.blazelight.p4oc.data.session.SessionRepositoryProvider
@@ -1636,7 +1637,7 @@ private fun addWorkspaceSheetHost(params: MainTabContentParams) {
                 ?.let { owner -> workspaceClientDirectoryBrowser(owner.workspaceClient) }
         },
         browseStart = { server -> browseStartFor(server.endpointKey, params.homeRepositoryStates, params.tabs) },
-          createFolder = { server, path ->
+        createFolder = { server, path ->
             val owner = params.tabMaps.workspaceOwners["home:${server.endpointKey}"]
                 ?: return@addWorkspaceDependencies "The server is not connected; reconnect and try again."
             when (val result = owner.fileRepository.createWorkspaceDirectory(path.value)) {
