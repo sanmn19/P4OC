@@ -120,6 +120,7 @@ fun AssistantMessages(
     }
 }
 
+@Suppress("FunctionNaming")
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun UserMessage(
@@ -193,6 +194,7 @@ private fun UserMessage(
     }
 }
 
+@Suppress("FunctionNaming")
 @Composable
 private fun RevertAction(
     onWidthChange: (Int) -> Unit,
@@ -478,6 +480,7 @@ private fun userMessageContent(messageWithParts: MessageWithParts): UserMessageC
 }
 
 /** Content of the user-message panel: the "you" label, the markdown body, attachments, state. */
+@Suppress("FunctionNaming")
 @Composable
 private fun UserMessageBody(
     text: String,
@@ -509,6 +512,7 @@ private fun UserMessageBody(
 }
 
 /** Row under a queued user message: the queued state chip plus the force-send affordance. */
+@Suppress("FunctionNaming")
 @Composable
 private fun QueuedMessageFooter(onForceSend: (() -> Unit)?) {
     val theme = LocalOpenCodeTheme.current

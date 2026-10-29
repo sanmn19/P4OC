@@ -1699,27 +1699,29 @@ class ChatViewModel constructor(
             }
 
             // Re-send as a fresh prompt (same request shape as a normal send).
-            val knownMessageIds = messages.value.mapTo(mutableSetOf()) { it.message.id }
-            val request = SendMessageRequest(parts = buildPartInputs(text, emptyList()))
-            when (sessionRepository.sendMessageAsync(SessionId(sessionId), request).await().toApiResult()) {
-                is ApiResult.Success -> {
-                    invalidateInitOperation()
-                    responseReconciliationJob?.cancel()
-                    responseReconciliationJob = null
-                    sessionRepository.acceptEvent(
-                        OpenCodeEvent.SessionStatusChanged(sessionId, SessionStatus.Busy)
-                    )
-                    _uiState.update { it.copy(isSending = false, isBusy = true, runNotice = null) }
-                    startResponseReconciliation(knownMessageIds)
-                }
-                is ApiResult.Error -> {
-                    suppressStaleRunErrors = false
-                    _uiState.update {
-                        it.copy(
-                            isSending = false,
-                            error = "The run stopped, but re-sending failed. Check the connection.",
-                        )
-                    }
+            resendQueuedText(text)
+        }
+    }
+
+    /** Re-sends force-sent text as a fresh prompt with fresh-message reconciliation. */
+    private suspend fun resendQueuedText(text: String) {
+        val knownMessageIds = messages.value.mapTo(mutableSetOf()) { it.message.id }
+        val request = SendMessageRequest(parts = buildPartInputs(text, emptyList()))
+        when (sessionRepository.sendMessageAsync(SessionId(sessionId), request).await().toApiResult()) {
+            is ApiResult.Success -> {
+                invalidateInitOperation()
+                responseReconciliationJob?.cancel()
+                responseReconciliationJob = null
+                sessionRepository.acceptEvent(
+                    OpenCodeEvent.SessionStatusChanged(sessionId, SessionStatus.Busy)
+                )
+                _uiState.update { it.copy(isSending = false, isBusy = true, runNotice = null) }
+                startResponseReconciliation(knownMessageIds)
+            }
+            is ApiResult.Error -> {
+                suppressStaleRunErrors = false
+                _uiState.update {
+                    it.copy(isSending = false, error = "The run stopped, but re-sending failed. Check the connection.")
                 }
             }
         }
