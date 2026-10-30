@@ -196,6 +196,14 @@ interface OpenCodeApi {
         @Query("workspace") workspace: String?
     ): List<MessageWrapperDto>
 
+    @DELETE("session/{sessionId}/message/{messageId}")
+    suspend fun removeMessage(
+        @Path("sessionId") sessionId: String,
+        @Path("messageId") messageId: String,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
+    ): Boolean
+
     @GET("session/{sessionId}/message/{messageId}")
     suspend fun getMessage(
         @Path("sessionId") sessionId: String,
