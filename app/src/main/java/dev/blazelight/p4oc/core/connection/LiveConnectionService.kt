@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.notification.NotificationHelper
 
 /**
@@ -54,7 +55,23 @@ class LiveConnectionService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * Android 15+ enforces a 6-hour-per-24-hour budget for `dataSync` foreground services. When
+     * the budget runs out the system calls this and stops counting the service as foreground; the
+     * app then has a few seconds to stop it, otherwise the system kills the process with
+     * `ForegroundServiceDidNotStopInTimeException`. Stop here and let the coordinator restart the
+     * service on the next foreground→background transition (foregrounding resets the budget).
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        AppLog.w(TAG, "Live connection foreground timeout reached; stopping service")
+        NotificationHelper.dismissLiveConnection(this)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(startId)
+    }
+
     companion object {
+        private const val TAG = "LiveConnectionService"
+
         const val EXTRA_SERVER_LABEL = "live_connection.server_label"
 
         fun intent(context: Context, serverLabel: String?): Intent =
