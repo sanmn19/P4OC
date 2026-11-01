@@ -707,7 +707,7 @@ class SettingsDataStore constructor(
             questions = prefs[KEY_NOTIFY_QUESTIONS] ?: true,
             vibrationPattern = prefs[KEY_NOTIFY_VIBRATION_PATTERN]?.toVibrationPattern()
                 ?: if (prefs[KEY_NOTIFY_VIBRATE_ON_COMPLETION] == true) VibrationPattern.Tick else VibrationPattern.None,
-            notifyOnCompletion = prefs[KEY_NOTIFY_ON_COMPLETION] ?: false,
+            notifyOnCompletion = prefs[KEY_NOTIFY_ON_COMPLETION] ?: true,
             serverRouting = decodeServerRouting(prefs[KEY_NOTIFY_SERVER_ROUTING]),
         )
     }
@@ -1184,7 +1184,7 @@ data class NotificationSettings(
     val permissionRequests: Boolean = true,
     val questions: Boolean = true,
     val vibrationPattern: VibrationPattern = VibrationPattern.None,
-    val notifyOnCompletion: Boolean = false,
+    val notifyOnCompletion: Boolean = true,
     /** Per-server notification routing, keyed by endpointKey. Absent = All (design 18). */
     val serverRouting: Map<String, NotificationRoutingMode> = emptyMap(),
 )
