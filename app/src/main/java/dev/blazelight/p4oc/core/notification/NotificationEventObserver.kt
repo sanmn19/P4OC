@@ -82,7 +82,9 @@ class NotificationEventObserver constructor(
     }
 
     private fun handleEvent(scopedEvent: ScopedEvent) {
-        when (val event = scopedEvent.event) {
+        val event = scopedEvent.event
+        recordDiagnostic(event)
+        when (event) {
             is OpenCodeEvent.PermissionRequested -> handlePermission(scopedEvent, event)
             is OpenCodeEvent.QuestionAsked -> handleQuestion(scopedEvent, event)
             is OpenCodeEvent.SessionStatusChanged -> handleStatus(scopedEvent, event)
@@ -97,14 +99,31 @@ class NotificationEventObserver constructor(
         }
     }
 
+    private fun recordDiagnostic(event: OpenCodeEvent) {
+        when (event) {
+            is OpenCodeEvent.PermissionRequested,
+            is OpenCodeEvent.QuestionAsked,
+            is OpenCodeEvent.SessionStatusChanged,
+            is OpenCodeEvent.SessionIdle,
+            -> NotificationDiagnostics.record("event ${event::class.simpleName}")
+            else -> Unit
+        }
+    }
+
     /** Per-server routing gate; absent entry defaults to [NotificationRoutingMode.All]. */
     private fun routingModeFor(serverRef: ServerRef): NotificationRoutingMode =
         cachedSettings.serverRouting[serverRef.endpointKey] ?: NotificationRoutingMode.All
 
     private fun handlePermission(scopedEvent: ScopedEvent, event: OpenCodeEvent.PermissionRequested) {
-        if (!cachedSettings.enabled || !cachedSettings.permissionRequests) return
+        if (!cachedSettings.enabled || !cachedSettings.permissionRequests) {
+            NotificationDiagnostics.record("permission skipped: setting off")
+            return
+        }
         // Awaiting-input events are "mentions": All and Mentions deliver, Off suppresses.
-        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) return
+        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) {
+            NotificationDiagnostics.record("permission skipped: routing off")
+            return
+        }
         AppLog.d(TAG, "Permission requested")
         notificationHelper.showPermissionNotification(
             sessionId = event.permission.sessionID,
@@ -115,8 +134,14 @@ class NotificationEventObserver constructor(
     }
 
     private fun handleQuestion(scopedEvent: ScopedEvent, event: OpenCodeEvent.QuestionAsked) {
-        if (!cachedSettings.enabled || !cachedSettings.questions) return
-        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) return
+        if (!cachedSettings.enabled || !cachedSettings.questions) {
+            NotificationDiagnostics.record("question skipped: setting off")
+            return
+        }
+        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) {
+            NotificationDiagnostics.record("question skipped: routing off")
+            return
+        }
         AppLog.d(TAG, "Question asked")
         notificationHelper.showQuestionNotification(
             sessionId = event.request.sessionID,
@@ -136,12 +161,19 @@ class NotificationEventObserver constructor(
     }
 
     private fun complete(route: NotificationRoute) {
-        if (completionTracker.complete(route)) showCompletionFeedback(route)
+        if (completionTracker.complete(route)) {
+            showCompletionFeedback(route)
+        } else {
+            NotificationDiagnostics.record("completion skipped: no busy run tracked")
+        }
     }
 
     private fun showCompletionFeedback(route: NotificationRoute) {
         // Turn-complete is not a "mention": only the All routing mode delivers it.
-        if (!shouldDeliverCompletion(routingModeFor(route.serverRef))) return
+        if (!shouldDeliverCompletion(routingModeFor(route.serverRef))) {
+            NotificationDiagnostics.record("completion skipped: routing mode")
+            return
+        }
         if (cachedSettings.notifyOnCompletion) {
             hapticFeedback.vibrate(cachedSettings.vibrationPattern)
             notificationHelper.showCompletionNotification(

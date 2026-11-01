@@ -244,7 +244,9 @@ class NotificationHelper constructor(
             val manager = NotificationManagerCompat.from(context)
             manager.notify(identity, notificationId, notification)
             manager.notify("$chatKey:summary", CHAT_SUMMARY_NOTIFICATION_ID, chatSummary(route, chatKey, updates))
+            NotificationDiagnostics.record("posted ${update.title}")
         } catch (e: SecurityException) {
+            NotificationDiagnostics.record("post failed: ${e::class.simpleName}")
             AppLog.w(TAG, "Notification post failed (${e::class.simpleName})")
         }
     }

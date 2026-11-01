@@ -7,6 +7,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import dev.blazelight.p4oc.core.log.AppLog
+import dev.blazelight.p4oc.core.notification.NotificationDiagnostics
 import dev.blazelight.p4oc.core.notification.NotificationHelper
 
 /**
@@ -27,6 +28,7 @@ class LiveConnectionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val serverLabel = intent?.getStringExtra(EXTRA_SERVER_LABEL)
+        NotificationDiagnostics.record("FGS started")
         NotificationHelper.ensureChannels(this)
         val notification = NotificationHelper.liveConnectionNotification(this, serverLabel)
         try {
@@ -63,6 +65,7 @@ class LiveConnectionService : Service() {
      * service on the next foreground→background transition (foregrounding resets the budget).
      */
     override fun onTimeout(startId: Int, fgsType: Int) {
+        NotificationDiagnostics.record("FGS timed out; stopping")
         AppLog.w(TAG, "Live connection foreground timeout reached; stopping service")
         NotificationHelper.dismissLiveConnection(this)
         stopForeground(STOP_FOREGROUND_REMOVE)

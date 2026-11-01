@@ -10,6 +10,7 @@ import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
+import dev.blazelight.p4oc.core.notification.NotificationDiagnostics
 import dev.blazelight.p4oc.core.notification.NotificationHelper
 import dev.blazelight.p4oc.domain.server.ServerRef
 import kotlinx.coroutines.CoroutineScope
@@ -66,19 +67,28 @@ class ConnectionForegroundCoordinator constructor(
     }
 
     override fun onStart(owner: LifecycleOwner) {
+        NotificationDiagnostics.record("FGS stop requested (app foreground)")
         context.stopService(Intent(context, LiveConnectionService::class.java))
         NotificationHelper.dismissLiveConnection(context)
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        if (!keepLiveInBackground) return
+        if (!keepLiveInBackground) {
+            NotificationDiagnostics.record("FGS start skipped: keep-live off")
+            return
+        }
         val connected = savedServers.firstOrNull { server ->
             registry.connectionState(server).value is ConnectionState.Connected
-        } ?: return
+        } ?: run {
+            NotificationDiagnostics.record("FGS start skipped: no connected server")
+            return
+        }
         try {
             context.startForegroundService(intent(context, connected.displayName))
+            NotificationDiagnostics.record("FGS start requested (${connected.displayName})")
             AppLog.d(TAG, "Started live connection service for ${connected.displayName}")
         } catch (_: IllegalStateException) {
+            NotificationDiagnostics.record("FGS start denied by Android")
             // On Android 12+ this is ForegroundServiceStartNotAllowedException (a
             // RuntimeException); the start window can be closed on some OEM transitions and
             // the process continues best-effort exactly as it did before this coordinator.
