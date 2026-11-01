@@ -263,6 +263,21 @@ class ServerConnectionRegistry constructor(
         }.getOrNull()
     }
 
+    /** Title of the first pending v2 form (the AI's question) for a session, if any. */
+    @Suppress("ReturnCount")
+    suspend fun pendingFormTitle(
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
+        sessionId: String,
+    ): String? {
+        val connection = connections[serverRef.endpointKey]?.value ?: return null
+        val api = connection.api as? V2WorkspaceOpenCodeApi ?: return null
+        val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
+        return runCatching {
+            api.forms.listSessionForms(sessionId, directory).firstOrNull()?.title
+        }.getOrNull()
+    }
+
     fun disconnect(serverRef: ServerRef) {
         connectJobs.remove(serverRef.endpointKey)?.cancel()
         stateCollectors.remove(serverRef.endpointKey).let { collector ->

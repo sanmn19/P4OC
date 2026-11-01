@@ -87,6 +87,7 @@ class NotificationEventObserver constructor(
         when (event) {
             is OpenCodeEvent.PermissionRequested -> handlePermission(scopedEvent, event)
             is OpenCodeEvent.QuestionAsked -> handleQuestion(scopedEvent, event)
+            is OpenCodeEvent.FormRefreshRequested -> handleForm(scopedEvent, event)
             is OpenCodeEvent.SessionStatusChanged -> handleStatus(scopedEvent, event)
             is OpenCodeEvent.SessionIdle -> complete(scopedEvent.route(event.sessionID))
             is OpenCodeEvent.Connected -> catchUpMissedCompletions()
@@ -104,6 +105,7 @@ class NotificationEventObserver constructor(
         when (event) {
             is OpenCodeEvent.PermissionRequested,
             is OpenCodeEvent.QuestionAsked,
+            is OpenCodeEvent.FormRefreshRequested,
             is OpenCodeEvent.SessionStatusChanged,
             is OpenCodeEvent.SessionIdle,
             -> NotificationDiagnostics.record("event ${event::class.simpleName}")
@@ -150,6 +152,35 @@ class NotificationEventObserver constructor(
             workspaceKey = scopedEvent.workspaceKey,
             question = event.request.questions.firstOrNull()?.question,
         )
+    }
+
+    /**
+     * v2 servers ask questions as forms (`form.created`), so the question text lives in the
+     * pending form rather than in the event payload.
+     */
+    private fun handleForm(scopedEvent: ScopedEvent, event: OpenCodeEvent.FormRefreshRequested) {
+        if (!cachedSettings.enabled || !cachedSettings.questions) {
+            NotificationDiagnostics.record("form skipped: setting off")
+            return
+        }
+        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) {
+            NotificationDiagnostics.record("form skipped: routing off")
+            return
+        }
+        scope.launch {
+            val title = serverConnectionRegistry.pendingFormTitle(
+                serverRef = scopedEvent.serverRef,
+                workspaceKey = scopedEvent.workspaceKey,
+                sessionId = event.sessionID,
+            )
+            NotificationDiagnostics.record("form notification for ${event.sessionID}")
+            notificationHelper.showQuestionNotification(
+                sessionId = event.sessionID,
+                serverRef = scopedEvent.serverRef,
+                workspaceKey = scopedEvent.workspaceKey,
+                question = title,
+            )
+        }
     }
 
     private fun handleStatus(scopedEvent: ScopedEvent, event: OpenCodeEvent.SessionStatusChanged) {
