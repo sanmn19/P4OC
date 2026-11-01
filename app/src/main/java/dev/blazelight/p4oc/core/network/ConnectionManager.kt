@@ -388,7 +388,12 @@ class ConnectionManager constructor(
 
     internal fun buildSseOkHttpClient(base: OkHttpClient): OkHttpClient =
         base.newBuilder()
-            .readTimeout(60, TimeUnit.SECONDS)
+            // No read timeout: an idle SSE stream must stay open. A finite timeout tore the
+            // stream down after every quiet minute (typically while backgrounded), and any
+            // session.idle / permission.asked that fired during the reconnect gap was lost, so
+            // background notifications never arrived. Dead sockets are detected by the SSE error
+            // path, the reconnect owner, and the OS rather than a per-read deadline.
+            .readTimeout(0, TimeUnit.SECONDS)
             .addInterceptor(createDiagnosticLoggingInterceptor())
             .build()
 

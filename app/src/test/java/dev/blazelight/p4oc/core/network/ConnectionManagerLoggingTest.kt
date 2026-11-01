@@ -40,16 +40,17 @@ class ConnectionManagerLoggingTest {
     }
 
     @Test
-    fun `sse client uses a finite read timeout to detect silent dead sockets`() {
+    fun `sse client keeps an idle stream open instead of timing it out`() {
         val base = manager.buildBaseOkHttpClient(
             ServerConfig(url = "https://opencode.test", username = "user"),
             password = "secret",
         )
         val sseClient = manager.buildSseOkHttpClient(base)
 
-        // 60s finite read timeout so a half-open SSE socket that stops producing
-        // frames (heartbeats) eventually errors and the library reconnects (issue #14).
-        assertEquals(60_000, sseClient.readTimeoutMillis)
+        // No read deadline: a quiet stream is normal (the agent may run for minutes).
+        // A finite timeout closed the stream every quiet minute, and events that fired
+        // during the reconnect gap were lost (background notifications stopped).
+        assertEquals(0, sseClient.readTimeoutMillis)
     }
 
     private val dispatcher = StandardTestDispatcher()
