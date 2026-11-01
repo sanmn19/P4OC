@@ -449,7 +449,8 @@ private fun AnnotatedString.Builder.appendBold(
         return start + 1
     }
     withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = colors.strong)) {
-        append(text.substring(start + 2, end))
+        // Bold prose often carries the important link (e.g. a PR title plus its URL).
+        appendLinked(text.substring(start + 2, end), colors)
     }
     return end + 2
 }

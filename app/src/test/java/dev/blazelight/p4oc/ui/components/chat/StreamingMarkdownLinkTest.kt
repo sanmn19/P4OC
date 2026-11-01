@@ -43,6 +43,20 @@ class StreamingMarkdownLinkTest {
     }
 
     @Test
+    fun `url inside bold text is still a link`() {
+        val text = inlineMarkdown("**PR #8 — https://github.com/sanmn19/P4OC/pull/8**", colors)
+
+        assertEquals(listOf("https://github.com/sanmn19/P4OC/pull/8"), linkUrls(text))
+    }
+
+    @Test
+    fun `url inside a list item is a link`() {
+        val text = inlineMarkdown("- see https://example.com/a", colors)
+
+        assertEquals(listOf("https://example.com/a"), linkUrls(text))
+    }
+
+    @Test
     fun `unsafe markdown link target is not a link`() {
         val text = inlineMarkdown("[x](javascript:alert(1))", colors)
 
