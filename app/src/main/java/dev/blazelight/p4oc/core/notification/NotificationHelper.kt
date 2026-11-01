@@ -125,6 +125,9 @@ class NotificationHelper constructor(
         ensureChannels(context)
     }
 
+    /** Context for callers that need to inspect notification permission/channels. */
+    fun context(): Context = context
+
     private data class ChatUpdate(val title: String, val text: String)
 
     /**

@@ -1,5 +1,10 @@
 package dev.blazelight.p4oc.core.notification
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -48,6 +53,7 @@ class NotificationEventObserver constructor(
     private val completionTracker = CompletionTracker()
 
     fun start() {
+        NotificationDiagnostics.record(deliveryState())
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         observeEvents()
         observeSettings()
@@ -100,6 +106,23 @@ class NotificationEventObserver constructor(
             )
             else -> {}
         }
+    }
+
+    /** Why a posted notification may not be visible: permission or channel state. */
+    private fun deliveryState(): String {
+        val permission = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                notificationHelper.context(),
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            "allowed"
+        } else {
+            "denied"
+        }
+        val importance = NotificationManagerCompat.from(notificationHelper.context())
+            .getNotificationChannel(NotificationHelper.CHANNEL_ID)?.importance ?: -1
+        return "notifications $permission, question channel importance=$importance"
     }
 
     private fun recordDiagnostic(event: OpenCodeEvent) {
