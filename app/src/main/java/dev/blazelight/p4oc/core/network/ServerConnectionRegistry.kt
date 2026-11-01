@@ -5,6 +5,7 @@ package dev.blazelight.p4oc.core.network
 import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.data.remote.dto.ProjectDto
+import dev.blazelight.p4oc.data.remote.dto.SessionStatusDto
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.server.ScopedEvent
 import dev.blazelight.p4oc.domain.server.ServerGeneration
@@ -248,6 +249,18 @@ class ServerConnectionRegistry constructor(
     suspend fun connect(serverId: String, password: String? = null) {
         val server = settingsDataStore.findSavedServer(serverId) ?: return
         connect(server, password ?: settingsDataStore.getSavedServerPassword(server))
+    }
+
+    /** Session statuses for one workspace, used to catch up after an SSE gap. */
+    suspend fun sessionStatuses(
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
+    ): Map<String, SessionStatusDto>? {
+        val connection = connections[serverRef.endpointKey]?.value ?: return null
+        val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
+        return runCatching {
+            connection.api.getSessionStatuses(directory = directory, workspace = null)
+        }.getOrNull()
     }
 
     fun disconnect(serverRef: ServerRef) {

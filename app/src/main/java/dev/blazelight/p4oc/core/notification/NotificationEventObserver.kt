@@ -89,6 +89,7 @@ class NotificationEventObserver constructor(
             is OpenCodeEvent.QuestionAsked -> handleQuestion(scopedEvent, event)
             is OpenCodeEvent.SessionStatusChanged -> handleStatus(scopedEvent, event)
             is OpenCodeEvent.SessionIdle -> complete(scopedEvent.route(event.sessionID))
+            is OpenCodeEvent.Connected -> catchUpMissedCompletions()
             is OpenCodeEvent.Disconnected -> completionTracker.clearServer(scopedEvent.serverRef)
             OpenCodeEvent.GlobalDisposed -> completionTracker.clearServer(scopedEvent.serverRef)
             is OpenCodeEvent.ServerInstanceDisposed -> completionTracker.clearWorkspace(
@@ -185,6 +186,27 @@ class NotificationEventObserver constructor(
         }
     }
 
+    /**
+     * A run can finish while the SSE stream is down (network drop, server restart). The live
+     * event never arrives, so on reconnect ask the server for the status of every session that
+     * was busy and post the completion for those that settled in the meantime.
+     */
+    private fun catchUpMissedCompletions() {
+        val routes = completionTracker.busyRoutes()
+        if (routes.isEmpty()) return
+        scope.launch {
+            routes.forEach { route ->
+                val statuses = serverConnectionRegistry.sessionStatuses(route.serverRef, route.workspaceKey)
+                    ?: return@forEach
+                val status = statuses[route.sessionId]
+                if (status == null || status.type == "idle") {
+                    NotificationDiagnostics.record("catch-up completion for ${route.sessionId}")
+                    if (completionTracker.complete(route)) showCompletionFeedback(route)
+                }
+            }
+        }
+    }
+
     private fun ScopedEvent.route(sessionId: String) = NotificationRoute(
         sessionId = sessionId,
         serverRef = serverRef,
@@ -211,6 +233,8 @@ internal class CompletionTracker {
     }
 
     fun complete(route: NotificationRoute): Boolean = busySessions.remove(route)
+
+    fun busyRoutes(): List<NotificationRoute> = busySessions.toList()
 
     fun clear() {
         busySessions.clear()
