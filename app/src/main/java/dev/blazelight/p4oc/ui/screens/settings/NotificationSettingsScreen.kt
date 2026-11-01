@@ -21,12 +21,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.core.content.ContextCompat
@@ -736,6 +738,7 @@ private fun NotificationSwitch(
 @Composable
 private fun DiagnosticsSection(onSendTest: () -> Unit) {
     val theme = LocalOpenCodeTheme.current
+    val clipboard = LocalClipboardManager.current
     var lines by remember { mutableStateOf(NotificationDiagnostics.snapshot()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -752,11 +755,21 @@ private fun DiagnosticsSection(onSendTest: () -> Unit) {
             color = theme.textMuted,
         )
         Spacer(Modifier.height(Spacing.sm))
-        TuiButton(
-            onClick = onSendTest,
-            modifier = Modifier.testTag("notification_send_test"),
-        ) {
-            Text(stringResource(R.string.notification_send_test))
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            TuiButton(
+                onClick = onSendTest,
+                modifier = Modifier.testTag("notification_send_test"),
+            ) {
+                Text(stringResource(R.string.notification_send_test))
+            }
+            TuiTextButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(NotificationDiagnostics.snapshot().joinToString("\n")))
+                },
+                modifier = Modifier.testTag("notification_copy_diagnostics"),
+            ) {
+                Text(stringResource(R.string.notification_copy_diagnostics))
+            }
         }
         Spacer(Modifier.height(Spacing.sm))
         lines.takeLast(DIAGNOSTICS_LINE_COUNT).forEach { line ->

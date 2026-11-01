@@ -1001,6 +1001,7 @@
     <string name="notification_diagnostics">Diagnostics</string>
     <string name="notification_diagnostics_hint">Tap the test button, then background the app: the second test notification arrives 10 seconds later. This list shows what the pipeline did.</string>
     <string name="notification_send_test">Send test notification</string>
+    <string name="notification_copy_diagnostics">Copy</string>
     <plurals name="notification_group_updates">
         <item quantity="one">%1$d update</item>
         <item quantity="other">%1$d updates</item>
