@@ -52,6 +52,7 @@ class NotificationHelper constructor(
         const val PERMISSION_NOTIFICATION_ID = 0x40000000
         const val QUESTION_NOTIFICATION_ID = 0x20000000
         const val COMPLETION_NOTIFICATION_ID = 0x10000000
+        const val CHAT_SUMMARY_NOTIFICATION_ID = 0x04000000
         const val LIVE_CONNECTION_NOTIFICATION_ID = 0x7FFFFFFE
 
         /** Idempotent channel creation, shared by NotificationHelper instances and the FGS. */
@@ -124,6 +125,14 @@ class NotificationHelper constructor(
         ensureChannels(context)
     }
 
+    private data class ChatUpdate(val title: String, val text: String)
+
+    /**
+     * Everything that happened in one chat, newest last. One notification per chat means the shade
+     * collapses all of a chat's updates into a single card instead of one card per event.
+     */
+    private val chatUpdates = mutableMapOf<String, MutableMap<String, ChatUpdate>>()
+
     fun showPermissionNotification(
         sessionId: String,
         serverRef: ServerRef,
@@ -131,38 +140,17 @@ class NotificationHelper constructor(
         permission: Permission,
     ) {
         val route = NotificationRoute(sessionId, serverRef, workspaceKey)
-        val identity = NotificationRouteCodec.identity(NotificationKind.Permission, route)
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            data = Uri.parse(identity)
-            NotificationRouteCodec.write(this, route)
-        }
-
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            PERMISSION_NOTIFICATION_ID,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
         val title = boundedNotificationText(
             PermissionDisplayFormatter.title(context, permission),
             context.getString(R.string.notification_permission_required),
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(context.getString(R.string.notification_permission_required))
-            .setContentText(title)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .build()
-
-        try {
-            NotificationManagerCompat.from(context).notify(identity, PERMISSION_NOTIFICATION_ID, notification)
-        } catch (e: SecurityException) {
-            AppLog.w(TAG, "Notification post failed (${e::class.simpleName})")
-        }
+        postChatNotification(
+            route = route,
+            identity = NotificationRouteCodec.identity(NotificationKind.Permission, route),
+            notificationId = PERMISSION_NOTIFICATION_ID,
+            update = ChatUpdate(context.getString(R.string.notification_permission_required), title),
+            silent = false,
+        )
     }
 
     fun showQuestionNotification(
@@ -172,40 +160,17 @@ class NotificationHelper constructor(
         question: String?,
     ) {
         val route = NotificationRoute(sessionId, serverRef, workspaceKey)
-        val identity = NotificationRouteCodec.identity(NotificationKind.Question, route)
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            data = Uri.parse(identity)
-            NotificationRouteCodec.write(this, route)
-        }
-
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            QUESTION_NOTIFICATION_ID,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
         val questionText = boundedNotificationText(
             question,
             context.getString(R.string.notification_question_fallback),
         )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(context.getString(R.string.notification_question_title))
-            .setContentText(questionText)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(questionText))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .build()
-
-        try {
-            NotificationManagerCompat.from(context).notify(identity, QUESTION_NOTIFICATION_ID, notification)
-        } catch (e: SecurityException) {
-            AppLog.w(TAG, "Notification post failed (${e::class.simpleName})")
-        }
+        postChatNotification(
+            route = route,
+            identity = NotificationRouteCodec.identity(NotificationKind.Question, route),
+            notificationId = QUESTION_NOTIFICATION_ID,
+            update = ChatUpdate(context.getString(R.string.notification_question_title), questionText),
+            silent = false,
+        )
     }
 
     fun showCompletionNotification(
@@ -215,42 +180,136 @@ class NotificationHelper constructor(
         sessionTitle: String?,
     ) {
         val route = NotificationRoute(sessionId, serverRef, workspaceKey)
+        val sessionText = boundedNotificationText(
+            sessionTitle,
+            context.getString(R.string.notification_completion_fallback),
+        )
+        postChatNotification(
+            route = route,
+            identity = NotificationRouteCodec.identity(NotificationKind.Completion, route),
+            notificationId = COMPLETION_NOTIFICATION_ID,
+            update = ChatUpdate(context.getString(R.string.notification_completion_title), sessionText),
+            silent = true,
+        )
+    }
+
+    /**
+     * Posts (or updates) the one notification card that belongs to [route]'s chat. All events from a
+     * chat share a tag, so a second event replaces the card and the inbox style lists what happened,
+     * instead of stacking one card per event.
+     */
+    private fun postChatNotification(
+        route: NotificationRoute,
+        identity: String,
+        notificationId: Int,
+        update: ChatUpdate,
+        silent: Boolean,
+    ) {
+        val chatKey = chatGroupKey(route)
+        val updates = synchronized(chatUpdates) {
+            val perChat = chatUpdates.getOrPut(chatKey) { linkedMapOf() }
+            perChat[identity] = update
+            perChat.values.toList()
+        }
+        val latest = updates.last()
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(latest.title)
+            .setContentText(latest.text)
+            .setSubText(
+                boundedNotificationText(
+                    route.serverRef.displayName,
+                    context.getString(R.string.notification_group_fallback),
+                )
+            )
+            .apply {
+                if (updates.size > 1) {
+                    setStyle(
+                        NotificationCompat.InboxStyle().also { style ->
+                            updates.forEach { style.addLine("${it.title}: ${it.text}") }
+                        }
+                    )
+                }
+            }
+            .setPriority(if (silent) NotificationCompat.PRIORITY_DEFAULT else NotificationCompat.PRIORITY_HIGH)
+            .setSilent(silent)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(false)
+            .setGroup(chatKey)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+            .setContentIntent(contentIntent(route, notificationId))
+            .build()
+
+        try {
+            val manager = NotificationManagerCompat.from(context)
+            manager.notify(identity, notificationId, notification)
+            manager.notify("$chatKey:summary", CHAT_SUMMARY_NOTIFICATION_ID, chatSummary(route, chatKey, updates))
+        } catch (e: SecurityException) {
+            AppLog.w(TAG, "Notification post failed (${e::class.simpleName})")
+        }
+    }
+
+    /**
+     * Group header for one chat. Without it Android auto-groups every notification the app posts
+     * into a single app-wide section, which merges different chats into one card.
+     */
+    private fun chatSummary(
+        route: NotificationRoute,
+        chatKey: String,
+        updates: List<ChatUpdate>,
+    ): android.app.Notification {
+        val style = NotificationCompat.InboxStyle()
+        updates.forEach { style.addLine("${it.title}: ${it.text}") }
+        return NotificationCompat.Builder(context, COMPLETION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(
+                boundedNotificationText(
+                    route.serverRef.displayName,
+                    context.getString(R.string.notification_group_fallback),
+                )
+            )
+            .setContentText(
+                context.resources.getQuantityString(
+                    R.plurals.notification_group_updates,
+                    updates.size,
+                    updates.size,
+                )
+            )
+            .setStyle(style)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setGroup(chatKey)
+            .setGroupSummary(true)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+            .setContentIntent(contentIntent(route, CHAT_SUMMARY_NOTIFICATION_ID))
+            .build()
+    }
+
+    private fun contentIntent(route: NotificationRoute, requestCode: Int): PendingIntent {
         val identity = NotificationRouteCodec.identity(NotificationKind.Completion, route)
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             data = Uri.parse(identity)
             NotificationRouteCodec.write(this, route)
         }
-
-        val pendingIntent = PendingIntent.getActivity(
+        return PendingIntent.getActivity(
             context,
-            COMPLETION_NOTIFICATION_ID,
+            requestCode,
             intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-
-        val sessionText = boundedNotificationText(
-            sessionTitle,
-            context.getString(R.string.notification_completion_fallback),
-        )
-        val notification = NotificationCompat.Builder(context, COMPLETION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(context.getString(R.string.notification_completion_title))
-            .setContentText(sessionText)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .setOnlyAlertOnce(true)
-            .setContentIntent(pendingIntent)
-            .build()
-
-        try {
-            NotificationManagerCompat.from(context).notify(identity, COMPLETION_NOTIFICATION_ID, notification)
-        } catch (e: SecurityException) {
-            AppLog.w(TAG, "Notification post failed (${e::class.simpleName})")
-        }
     }
 
     fun clearNotifications() {
+        synchronized(chatUpdates) {
+            chatUpdates.clear()
+        }
         NotificationManagerCompat.from(context).cancelAll()
     }
 }
+
+/** One card per chat: every update from a session replaces the same notification. */
+internal fun chatGroupKey(route: NotificationRoute): String =
+    "chat:" + NotificationRouteCodec.identity(NotificationKind.Completion, route)

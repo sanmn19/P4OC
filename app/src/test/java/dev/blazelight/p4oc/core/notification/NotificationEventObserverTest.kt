@@ -4,6 +4,7 @@ import dev.blazelight.p4oc.core.datastore.NotificationRoutingMode
 import dev.blazelight.p4oc.core.datastore.NotificationSettings
 import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -19,9 +20,16 @@ class NotificationEventObserverTest {
         val disabled = NotificationSettings(enabled = true, notifyOnCompletion = false)
         val enabled = disabled.copy(notifyOnCompletion = true)
 
-        assertFalse(shouldEmitCompletionFeedback(disabled, isInForeground = false))
-        assertFalse(shouldEmitCompletionFeedback(enabled, isInForeground = true))
-        assertTrue(shouldEmitCompletionFeedback(enabled, isInForeground = false))
+        assertFalse(shouldEmitCompletionFeedback(disabled))
+        assertTrue(shouldEmitCompletionFeedback(enabled))
+    }
+
+    @Test
+    fun `completion feedback does not depend on the app being backgrounded`() {
+        // The chat can be on screen when a run finishes; the user still wants the notification.
+        val enabled = NotificationSettings(enabled = true, notifyOnCompletion = true)
+
+        assertTrue(shouldEmitCompletionFeedback(enabled))
     }
 
     @Test
@@ -110,6 +118,31 @@ class NotificationEventObserverTest {
 
         assertFalse(tracker.complete(disposed))
         assertTrue(tracker.complete(retained))
+    }
+
+    @Test
+    fun `group key is deterministic for the same chat`() {
+        val first = route("session-a", serverA, workspaceA)
+        val second = route("session-a", serverA, workspaceA)
+
+        assertEquals(chatGroupKey(first), chatGroupKey(second))
+    }
+
+    @Test
+    fun `different chats get different group keys`() {
+        val first = route("session-a", serverA, workspaceA)
+        val second = route("session-b", serverA, workspaceA)
+        val otherWorkspace = route("session-a", serverA, workspaceB)
+        val otherServer = route("session-a", serverB, workspaceA)
+
+        val keys = setOf(
+            chatGroupKey(first),
+            chatGroupKey(second),
+            chatGroupKey(otherWorkspace),
+            chatGroupKey(otherServer),
+        )
+
+        assertEquals(4, keys.size)
     }
 
     private fun route(sessionId: String, serverRef: ServerRef, workspaceKey: WorkspaceKey) =

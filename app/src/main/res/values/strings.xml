@@ -946,14 +946,14 @@
     <string name="settings_notifications_desc">Control notification behavior</string>
     <string name="notification_general">General</string>
     <string name="notification_enable">Enable notifications</string>
-    <string name="notification_enable_desc">Show notifications when app is in background</string>
+    <string name="notification_enable_desc">Show notifications for finished runs and AI questions</string>
     <string name="notification_types">Notification Types</string>
     <string name="notification_permission_requests">Permission requests</string>
     <string name="notification_permission_requests_desc">Notify when a tool needs approval</string>
     <string name="notification_questions">AI questions</string>
     <string name="notification_questions_desc">Notify when the AI asks a question</string>
     <string name="notification_completion">Response completion</string>
-    <string name="notification_completion_desc">Post a notification when the assistant finishes in the background</string>
+    <string name="notification_completion_desc">Post a notification when the assistant finishes</string>
     <string name="notification_vibration_pattern">Vibration pattern</string>
     <string name="vibration_pattern_none">Off</string>
     <string name="vibration_pattern_tick">Tick</string>
@@ -997,6 +997,11 @@
     <string name="notification_question_fallback">AI has a question</string>
     <string name="notification_completion_title">Assistant finished</string>
     <string name="notification_completion_fallback">Response complete</string>
+    <string name="notification_group_fallback">Chat</string>
+    <plurals name="notification_group_updates">
+        <item quantity="one">%1$d update</item>
+        <item quantity="other">%1$d updates</item>
+    </plurals>
     <string name="notification_permission_denied_message">Notification permission was denied. To receive notifications when the AI needs your input, enable notifications in your device settings.</string>
     <string name="notification_open_settings">Open Settings</string>
     <string name="notification_permission_not_granted">Notification permission not granted</string>

@@ -40,7 +40,6 @@ class NotificationEventObserver constructor(
     }
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var isInForeground = true
 
     @Volatile
     private var cachedSettings = NotificationSettings()
@@ -59,13 +58,11 @@ class NotificationEventObserver constructor(
     }
 
     override fun onStart(owner: LifecycleOwner) {
-        isInForeground = true
+        // Coming back to the app means the user has seen the tray. Reset the busy
+        // tracker and drop stale entries; notifications raised while the app stays open
+        // are untouched (there is no lifecycle transition while it is visible).
         completionTracker.clear()
         notificationHelper.clearNotifications()
-    }
-
-    override fun onStop(owner: LifecycleOwner) {
-        isInForeground = false
     }
 
     private fun observeSettings() {
@@ -105,10 +102,10 @@ class NotificationEventObserver constructor(
         cachedSettings.serverRouting[serverRef.endpointKey] ?: NotificationRoutingMode.All
 
     private fun handlePermission(scopedEvent: ScopedEvent, event: OpenCodeEvent.PermissionRequested) {
-        if (isInForeground || !cachedSettings.enabled || !cachedSettings.permissionRequests) return
+        if (!cachedSettings.enabled || !cachedSettings.permissionRequests) return
         // Awaiting-input events are "mentions": All and Mentions deliver, Off suppresses.
         if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) return
-        AppLog.d(TAG, "Permission requested in background")
+        AppLog.d(TAG, "Permission requested")
         notificationHelper.showPermissionNotification(
             sessionId = event.permission.sessionID,
             serverRef = scopedEvent.serverRef,
@@ -118,9 +115,9 @@ class NotificationEventObserver constructor(
     }
 
     private fun handleQuestion(scopedEvent: ScopedEvent, event: OpenCodeEvent.QuestionAsked) {
-        if (isInForeground || !cachedSettings.enabled || !cachedSettings.questions) return
+        if (!cachedSettings.enabled || !cachedSettings.questions) return
         if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) return
-        AppLog.d(TAG, "Question asked in background")
+        AppLog.d(TAG, "Question asked")
         notificationHelper.showQuestionNotification(
             sessionId = event.request.sessionID,
             serverRef = scopedEvent.serverRef,
@@ -139,11 +136,7 @@ class NotificationEventObserver constructor(
     }
 
     private fun complete(route: NotificationRoute) {
-        if (completionTracker.complete(route)) showCompletionFeedbackIfBackground(route)
-    }
-
-    private fun showCompletionFeedbackIfBackground(route: NotificationRoute) {
-        if (shouldEmitCompletionFeedback(cachedSettings, isInForeground)) showCompletionFeedback(route)
+        if (completionTracker.complete(route)) showCompletionFeedback(route)
     }
 
     private fun showCompletionFeedback(route: NotificationRoute) {
@@ -167,8 +160,8 @@ class NotificationEventObserver constructor(
     )
 }
 
-internal fun shouldEmitCompletionFeedback(settings: NotificationSettings, isInForeground: Boolean): Boolean =
-    settings.enabled && settings.notifyOnCompletion && !isInForeground
+internal fun shouldEmitCompletionFeedback(settings: NotificationSettings): Boolean =
+    settings.enabled && settings.notifyOnCompletion
 
 /** Awaiting-input (permission/question) notifications: delivered unless the server is routed Off. */
 internal fun shouldDeliverAwaitingInput(mode: NotificationRoutingMode): Boolean =
