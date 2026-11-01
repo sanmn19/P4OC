@@ -158,17 +158,22 @@ class NotificationHelper constructor(
         serverRef: ServerRef,
         workspaceKey: WorkspaceKey,
         question: String?,
+        sessionTitle: String? = null,
     ) {
         val route = NotificationRoute(sessionId, serverRef, workspaceKey)
         val questionText = boundedNotificationText(
             question,
             context.getString(R.string.notification_question_fallback),
         )
+        val titleText = boundedNotificationText(
+            sessionTitle,
+            context.getString(R.string.notification_question_title),
+        )
         postChatNotification(
             route = route,
             identity = NotificationRouteCodec.identity(NotificationKind.Question, route),
             notificationId = QUESTION_NOTIFICATION_ID,
-            update = ChatUpdate(context.getString(R.string.notification_question_title), questionText),
+            update = ChatUpdate(titleText, questionText),
             silent = false,
         )
     }

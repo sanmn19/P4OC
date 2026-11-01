@@ -3,6 +3,7 @@
 package dev.blazelight.p4oc.core.network
 
 import dev.blazelight.p4oc.core.datastore.SavedServer
+import dev.blazelight.p4oc.core.notification.NotificationDiagnostics
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.data.remote.dto.ProjectDto
 import dev.blazelight.p4oc.data.remote.dto.SessionStatusDto
@@ -263,19 +264,43 @@ class ServerConnectionRegistry constructor(
         }.getOrNull()
     }
 
-    /** Title of the first pending v2 form (the AI's question) for a session, if any. */
-    @Suppress("ReturnCount")
-    suspend fun pendingFormTitle(
+    data class PendingQuestion(val sessionTitle: String?, val question: String?)
+
+    /** Chat name for a session, used as the notification title. */
+    suspend fun sessionTitle(
         serverRef: ServerRef,
         workspaceKey: WorkspaceKey,
         sessionId: String,
     ): String? {
         val connection = connections[serverRef.endpointKey]?.value ?: return null
-        val api = connection.api as? V2WorkspaceOpenCodeApi ?: return null
         val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
         return runCatching {
-            api.forms.listSessionForms(sessionId, directory).firstOrNull()?.title
+            connection.api.getSession(sessionId, directory, null).title
         }.getOrNull()
+    }
+
+    /** Chat name plus question text of the first pending v2 form, if any. */
+
+    @Suppress("ReturnCount")
+    suspend fun pendingQuestion(
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
+        sessionId: String,
+    ): PendingQuestion? {
+        val connection = connections[serverRef.endpointKey]?.value ?: return null
+        val api = connection.api as? V2WorkspaceOpenCodeApi ?: return null
+        val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
+        val sessionTitle = sessionTitle(serverRef, workspaceKey, sessionId)
+        val form = runCatching {
+            api.forms.listSessionForms(sessionId, directory).firstOrNull()
+        }.getOrNull()
+        val question = form?.title?.takeIf(String::isNotBlank)
+            ?: form?.fields?.firstOrNull { it.hidden != true }?.title
+        if (question == null && sessionTitle == null) {
+            NotificationDiagnostics.record("form lookup failed for ${sessionId.takeLast(SESSION_ID_SUFFIX)}")
+            return null
+        }
+        return PendingQuestion(sessionTitle, question)
     }
 
     fun disconnect(serverRef: ServerRef) {
@@ -470,6 +495,7 @@ class ServerConnectionRegistry constructor(
     private data class GenerationKey(val endpointKey: String, val generation: ServerGeneration)
 
     private companion object {
+        const val SESSION_ID_SUFFIX = 6
         val STALE_GENERATION_ERROR = ConnectionState.Error("Server connection generation is no longer available")
     }
 }

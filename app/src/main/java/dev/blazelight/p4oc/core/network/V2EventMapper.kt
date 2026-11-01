@@ -97,6 +97,10 @@ internal class V2EventMapper(private val json: Json, private val legacyMapper: E
             OpenCodeEvent.SessionRefreshRequested(it, removed = true)
         }
         type == "session.execution.failed" -> mapExecutionFailure(data, sessionID)
+        // v2 reports a finished turn as execution.succeeded/interrupted, not session.idle;
+        // without this the notification layer never saw a completion.
+        type == "session.execution.succeeded" || type == "session.execution.interrupted" ->
+            sessionID?.let { OpenCodeEvent.SessionIdle(it) }
         type in SESSION_REFRESH_TYPES -> sessionID?.let {
             OpenCodeEvent.SessionRefreshRequested(it)
         }
@@ -233,8 +237,6 @@ internal class V2EventMapper(private val json: Json, private val legacyMapper: E
             "server.heartbeat",
             "sync",
             "session.execution.started",
-            "session.execution.succeeded",
-            "session.execution.interrupted",
             // These only select execution defaults, not metadata represented by the session catalog.
             "session.agent.selected",
             "session.model.selected",

@@ -37,6 +37,7 @@ class NotificationEventObserver constructor(
 
     companion object {
         private const val TAG = "NotificationEventObserver"
+        private const val SESSION_ID_SUFFIX = 6
     }
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -146,12 +147,19 @@ class NotificationEventObserver constructor(
             return
         }
         AppLog.d(TAG, "Question asked")
-        notificationHelper.showQuestionNotification(
-            sessionId = event.request.sessionID,
-            serverRef = scopedEvent.serverRef,
-            workspaceKey = scopedEvent.workspaceKey,
-            question = event.request.questions.firstOrNull()?.question,
-        )
+        scope.launch {
+            notificationHelper.showQuestionNotification(
+                sessionId = event.request.sessionID,
+                serverRef = scopedEvent.serverRef,
+                workspaceKey = scopedEvent.workspaceKey,
+                question = event.request.questions.firstOrNull()?.question,
+                sessionTitle = serverConnectionRegistry.sessionTitle(
+                    serverRef = scopedEvent.serverRef,
+                    workspaceKey = scopedEvent.workspaceKey,
+                    sessionId = event.request.sessionID,
+                ),
+            )
+        }
     }
 
     /**
@@ -168,17 +176,21 @@ class NotificationEventObserver constructor(
             return
         }
         scope.launch {
-            val title = serverConnectionRegistry.pendingFormTitle(
+            val pending = serverConnectionRegistry.pendingQuestion(
                 serverRef = scopedEvent.serverRef,
                 workspaceKey = scopedEvent.workspaceKey,
                 sessionId = event.sessionID,
             )
-            NotificationDiagnostics.record("form notification for ${event.sessionID}")
+            NotificationDiagnostics.record(
+                "form notification for ${event.sessionID.takeLast(SESSION_ID_SUFFIX)}" +
+                    if (pending?.question == null) " (no text)" else ""
+            )
             notificationHelper.showQuestionNotification(
                 sessionId = event.sessionID,
                 serverRef = scopedEvent.serverRef,
                 workspaceKey = scopedEvent.workspaceKey,
-                question = title,
+                sessionTitle = pending?.sessionTitle,
+                question = pending?.question,
             )
         }
     }
