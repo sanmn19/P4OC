@@ -266,6 +266,32 @@ class ServerConnectionRegistry constructor(
 
     data class PendingQuestion(val sessionTitle: String?, val question: String?)
 
+    data class CompletionSummary(val sessionTitle: String?, val body: String?)
+
+    /** Chat name plus a short excerpt of the last assistant text, for completion notifications. */
+    @Suppress("ReturnCount")
+    suspend fun completionSummary(
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
+        sessionId: String,
+    ): CompletionSummary? {
+        val connection = connections[serverRef.endpointKey]?.value ?: return null
+        val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
+        val sessionTitle = runCatching {
+            connection.api.getSession(sessionId, directory, null).title
+        }.getOrNull()
+        val body = runCatching {
+            connection.api.getMessages(sessionId, null, null, directory, null)
+                .asReversed()
+                .firstNotNullOfOrNull { message ->
+                    message.parts.firstOrNull { it.type == "text" }?.text
+                        ?.takeIf { message.info.role == "assistant" && it.isNotBlank() }
+                }
+        }.getOrNull()
+        if (sessionTitle == null && body == null) return null
+        return CompletionSummary(sessionTitle, body)
+    }
+
     /** Chat name for a session, used as the notification title. */
     suspend fun sessionTitle(
         serverRef: ServerRef,

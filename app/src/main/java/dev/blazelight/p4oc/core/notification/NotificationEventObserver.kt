@@ -243,12 +243,24 @@ class NotificationEventObserver constructor(
         }
         if (cachedSettings.notifyOnCompletion) {
             hapticFeedback.vibrate(cachedSettings.vibrationPattern)
-            notificationHelper.showCompletionNotification(
-                sessionId = route.sessionId,
-                serverRef = route.serverRef,
-                workspaceKey = route.workspaceKey,
-                sessionTitle = null,
-            )
+            scope.launch {
+                val summary = serverConnectionRegistry.completionSummary(
+                    serverRef = route.serverRef,
+                    workspaceKey = route.workspaceKey,
+                    sessionId = route.sessionId,
+                )
+                NotificationDiagnostics.record(
+                    "completion notification for ${route.sessionId.takeLast(SESSION_ID_SUFFIX)}" +
+                        if (summary?.body == null) " (no text)" else ""
+                )
+                notificationHelper.showCompletionNotification(
+                    sessionId = route.sessionId,
+                    serverRef = route.serverRef,
+                    workspaceKey = route.workspaceKey,
+                    sessionTitle = summary?.sessionTitle,
+                    body = summary?.body,
+                )
+            }
         }
     }
 

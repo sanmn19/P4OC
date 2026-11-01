@@ -20,7 +20,18 @@ import dev.blazelight.p4oc.ui.permission.PermissionDisplayFormatter
 private const val TAG = "NotificationHelper"
 
 internal const val MAX_NOTIFICATION_TEXT_CODE_POINTS = 512
+internal const val COMPLETION_BODY_CODE_POINTS = 160
 private const val NOTIFICATION_TEXT_ELLIPSIS = "…"
+
+/** First line of [text], trimmed to a short notification body. */
+internal fun String.shortExcerpt(): String {
+    val line = lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: trim()
+    return if (line.length <= COMPLETION_BODY_CODE_POINTS) {
+        line
+    } else {
+        line.take(COMPLETION_BODY_CODE_POINTS - 1) + NOTIFICATION_TEXT_ELLIPSIS
+    }
+}
 
 internal fun boundedNotificationText(text: String?, fallback: String): String {
     val resolved = text ?: fallback
@@ -186,17 +197,22 @@ class NotificationHelper constructor(
         serverRef: ServerRef,
         workspaceKey: WorkspaceKey,
         sessionTitle: String?,
+        body: String? = null,
     ) {
         val route = NotificationRoute(sessionId, serverRef, workspaceKey)
-        val sessionText = boundedNotificationText(
+        val titleText = boundedNotificationText(
             sessionTitle,
+            context.getString(R.string.notification_completion_title),
+        )
+        val sessionText = boundedNotificationText(
+            body?.shortExcerpt(),
             context.getString(R.string.notification_completion_fallback),
         )
         postChatNotification(
             route = route,
             identity = NotificationRouteCodec.identity(NotificationKind.Completion, route),
             notificationId = COMPLETION_NOTIFICATION_ID,
-            update = ChatUpdate(context.getString(R.string.notification_completion_title), sessionText),
+            update = ChatUpdate(titleText, sessionText),
             silent = true,
         )
     }
