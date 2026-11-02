@@ -24,12 +24,20 @@ import dev.blazelight.p4oc.core.notification.NotificationHelper
  */
 class LiveConnectionService : Service() {
 
+    override fun onCreate() {
+        super.onCreate()
+        // Channels must exist before the foreground notification is built; creating them here keeps
+        // onStartCommand fast enough to satisfy the startForeground() deadline.
+        NotificationHelper.ensureChannels(this)
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val serverLabel = intent?.getStringExtra(EXTRA_SERVER_LABEL)
-        NotificationDiagnostics.record("FGS started")
-        NotificationHelper.ensureChannels(this)
+        // startForeground() must run within a few seconds of startForegroundService(), so it goes
+        // first: channel creation and diagnostics logging happen only after the service is promoted
+        // (a slow first call here is what raised ForegroundServiceDidNotStartInTimeException).
         val notification = NotificationHelper.liveConnectionNotification(this, serverLabel)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -48,9 +56,11 @@ class LiveConnectionService : Service() {
             // throw crashed the app. A sessionless background resurrection serves no purpose
             // anyway: end quietly; the coordinator starts the service fresh on the next real
             // foreground->background transition.
+            NotificationDiagnostics.record("FGS start rejected; stopping")
             stopSelf()
             return START_NOT_STICKY
         }
+        NotificationDiagnostics.record("FGS started")
         // Not sticky: the service's purpose is a live connection for an app session in use. If
         // the process dies the session is gone; a silent background restart would either crash
         // or idle-float with a stale tray entry. The coordinator owns the lifecycle instead.
