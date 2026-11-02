@@ -152,6 +152,7 @@ class NotificationEventObserver constructor(
             return
         }
         AppLog.d(TAG, "Permission requested")
+        vibrateForNotification()
         notificationHelper.showPermissionNotification(
             sessionId = event.permission.sessionID,
             serverRef = scopedEvent.serverRef,
@@ -170,6 +171,7 @@ class NotificationEventObserver constructor(
             return
         }
         AppLog.d(TAG, "Question asked")
+        vibrateForNotification()
         scope.launch {
             notificationHelper.showQuestionNotification(
                 sessionId = event.request.sessionID,
@@ -198,6 +200,7 @@ class NotificationEventObserver constructor(
             NotificationDiagnostics.record("form skipped: routing off")
             return
         }
+        vibrateForNotification()
         scope.launch {
             val pending = serverConnectionRegistry.pendingQuestion(
                 serverRef = scopedEvent.serverRef,
@@ -242,7 +245,7 @@ class NotificationEventObserver constructor(
             return
         }
         if (cachedSettings.notifyOnCompletion) {
-            hapticFeedback.vibrate(cachedSettings.vibrationPattern)
+            vibrateForNotification()
             scope.launch {
                 val summary = serverConnectionRegistry.completionSummary(
                     serverRef = route.serverRef,
@@ -283,6 +286,11 @@ class NotificationEventObserver constructor(
                 }
             }
         }
+    }
+
+    /** The vibration setting applies to every notification, not just completions. */
+    private fun vibrateForNotification() {
+        hapticFeedback.vibrate(cachedSettings.vibrationPattern)
     }
 
     private fun ScopedEvent.route(sessionId: String) = NotificationRoute(
