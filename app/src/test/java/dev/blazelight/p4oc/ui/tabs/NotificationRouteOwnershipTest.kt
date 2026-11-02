@@ -62,7 +62,16 @@ class NotificationRouteOwnershipTest {
         )
 
         assertEquals("exact", manager.findTabByNotificationRoute(route)?.id)
-        assertNull(manager.findTabByNotificationRoute(route.copy(workspaceKey = WorkspaceKey.Directory("/other"))))
+        // A session belongs to one workspace, so a global/directory-less route still finds it.
+        assertEquals(
+            "exact",
+            manager.findTabByNotificationRoute(route.copy(workspaceKey = WorkspaceKey.Directory("/other")))?.id,
+        )
+        assertNull(
+            manager.findTabByNotificationRoute(
+                route.copy(sessionId = "other-session", serverRef = ServerRef.fromEndpointKey("https://other.example")),
+            ),
+        )
     }
 
     @Test
