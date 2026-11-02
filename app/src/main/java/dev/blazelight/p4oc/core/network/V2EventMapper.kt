@@ -6,6 +6,7 @@ import dev.blazelight.p4oc.data.remote.mapper.EventMapper
 import dev.blazelight.p4oc.domain.model.MessageError
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.Permission
+import dev.blazelight.p4oc.domain.model.SessionStatus
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -97,6 +98,13 @@ internal class V2EventMapper(private val json: Json, private val legacyMapper: E
             OpenCodeEvent.SessionRefreshRequested(it, removed = true)
         }
         type == "session.execution.failed" -> mapExecutionFailure(data, sessionID)
+        // v2 reports the run lifecycle as execution.started/succeeded/interrupted, not
+        // session.status/idle; without these the notification layer never saw a run start or end.
+        type == "session.execution.started" -> sessionID?.let {
+            OpenCodeEvent.SessionStatusChanged(it, SessionStatus.Busy)
+        }
+        type == "session.execution.succeeded" || type == "session.execution.interrupted" ->
+            sessionID?.let { OpenCodeEvent.SessionIdle(it) }
         type in SESSION_REFRESH_TYPES -> sessionID?.let {
             OpenCodeEvent.SessionRefreshRequested(it)
         }
@@ -232,9 +240,6 @@ internal class V2EventMapper(private val json: Json, private val legacyMapper: E
             "session.usage.updated",
             "server.heartbeat",
             "sync",
-            "session.execution.started",
-            "session.execution.succeeded",
-            "session.execution.interrupted",
             // These only select execution defaults, not metadata represented by the session catalog.
             "session.agent.selected",
             "session.model.selected",

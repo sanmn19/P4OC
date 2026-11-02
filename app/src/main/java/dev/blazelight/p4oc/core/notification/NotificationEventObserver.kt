@@ -1,5 +1,10 @@
 package dev.blazelight.p4oc.core.notification
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -37,6 +42,7 @@ class NotificationEventObserver constructor(
 
     companion object {
         private const val TAG = "NotificationEventObserver"
+        private const val SESSION_ID_SUFFIX = 6
     }
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -47,6 +53,7 @@ class NotificationEventObserver constructor(
     private val completionTracker = CompletionTracker()
 
     fun start() {
+        NotificationDiagnostics.record(deliveryState())
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         observeEvents()
         observeSettings()
@@ -82,11 +89,15 @@ class NotificationEventObserver constructor(
     }
 
     private fun handleEvent(scopedEvent: ScopedEvent) {
-        when (val event = scopedEvent.event) {
+        val event = scopedEvent.event
+        recordDiagnostic(event)
+        when (event) {
             is OpenCodeEvent.PermissionRequested -> handlePermission(scopedEvent, event)
             is OpenCodeEvent.QuestionAsked -> handleQuestion(scopedEvent, event)
+            is OpenCodeEvent.FormRefreshRequested -> handleForm(scopedEvent, event)
             is OpenCodeEvent.SessionStatusChanged -> handleStatus(scopedEvent, event)
             is OpenCodeEvent.SessionIdle -> complete(scopedEvent.route(event.sessionID))
+            is OpenCodeEvent.Connected -> catchUpMissedCompletions()
             is OpenCodeEvent.Disconnected -> completionTracker.clearServer(scopedEvent.serverRef)
             OpenCodeEvent.GlobalDisposed -> completionTracker.clearServer(scopedEvent.serverRef)
             is OpenCodeEvent.ServerInstanceDisposed -> completionTracker.clearWorkspace(
@@ -97,14 +108,49 @@ class NotificationEventObserver constructor(
         }
     }
 
+    /** Why a posted notification may not be visible: permission or channel state. */
+    private fun deliveryState(): String {
+        val permission = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                notificationHelper.context(),
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            "allowed"
+        } else {
+            "denied"
+        }
+        val importance = NotificationManagerCompat.from(notificationHelper.context())
+            .getNotificationChannel(NotificationHelper.CHANNEL_ID)?.importance ?: -1
+        return "notifications $permission, question channel importance=$importance"
+    }
+
+    private fun recordDiagnostic(event: OpenCodeEvent) {
+        when (event) {
+            is OpenCodeEvent.PermissionRequested,
+            is OpenCodeEvent.QuestionAsked,
+            is OpenCodeEvent.FormRefreshRequested,
+            is OpenCodeEvent.SessionStatusChanged,
+            is OpenCodeEvent.SessionIdle,
+            -> NotificationDiagnostics.record("event ${event::class.simpleName}")
+            else -> Unit
+        }
+    }
+
     /** Per-server routing gate; absent entry defaults to [NotificationRoutingMode.All]. */
     private fun routingModeFor(serverRef: ServerRef): NotificationRoutingMode =
         cachedSettings.serverRouting[serverRef.endpointKey] ?: NotificationRoutingMode.All
 
     private fun handlePermission(scopedEvent: ScopedEvent, event: OpenCodeEvent.PermissionRequested) {
-        if (!cachedSettings.enabled || !cachedSettings.permissionRequests) return
+        if (!cachedSettings.enabled || !cachedSettings.permissionRequests) {
+            NotificationDiagnostics.record("permission skipped: setting off")
+            return
+        }
         // Awaiting-input events are "mentions": All and Mentions deliver, Off suppresses.
-        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) return
+        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) {
+            NotificationDiagnostics.record("permission skipped: routing off")
+            return
+        }
         AppLog.d(TAG, "Permission requested")
         notificationHelper.showPermissionNotification(
             sessionId = event.permission.sessionID,
@@ -115,15 +161,61 @@ class NotificationEventObserver constructor(
     }
 
     private fun handleQuestion(scopedEvent: ScopedEvent, event: OpenCodeEvent.QuestionAsked) {
-        if (!cachedSettings.enabled || !cachedSettings.questions) return
-        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) return
+        if (!cachedSettings.enabled || !cachedSettings.questions) {
+            NotificationDiagnostics.record("question skipped: setting off")
+            return
+        }
+        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) {
+            NotificationDiagnostics.record("question skipped: routing off")
+            return
+        }
         AppLog.d(TAG, "Question asked")
-        notificationHelper.showQuestionNotification(
-            sessionId = event.request.sessionID,
-            serverRef = scopedEvent.serverRef,
-            workspaceKey = scopedEvent.workspaceKey,
-            question = event.request.questions.firstOrNull()?.question,
-        )
+        scope.launch {
+            notificationHelper.showQuestionNotification(
+                sessionId = event.request.sessionID,
+                serverRef = scopedEvent.serverRef,
+                workspaceKey = scopedEvent.workspaceKey,
+                question = event.request.questions.firstOrNull()?.question,
+                sessionTitle = serverConnectionRegistry.sessionTitle(
+                    serverRef = scopedEvent.serverRef,
+                    workspaceKey = scopedEvent.workspaceKey,
+                    sessionId = event.request.sessionID,
+                ),
+            )
+        }
+    }
+
+    /**
+     * v2 servers ask questions as forms (`form.created`), so the question text lives in the
+     * pending form rather than in the event payload.
+     */
+    private fun handleForm(scopedEvent: ScopedEvent, event: OpenCodeEvent.FormRefreshRequested) {
+        if (!cachedSettings.enabled || !cachedSettings.questions) {
+            NotificationDiagnostics.record("form skipped: setting off")
+            return
+        }
+        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) {
+            NotificationDiagnostics.record("form skipped: routing off")
+            return
+        }
+        scope.launch {
+            val pending = serverConnectionRegistry.pendingQuestion(
+                serverRef = scopedEvent.serverRef,
+                workspaceKey = scopedEvent.workspaceKey,
+                sessionId = event.sessionID,
+            )
+            NotificationDiagnostics.record(
+                "form notification for ${event.sessionID.takeLast(SESSION_ID_SUFFIX)}" +
+                    if (pending?.question == null) " (no text)" else ""
+            )
+            notificationHelper.showQuestionNotification(
+                sessionId = event.sessionID,
+                serverRef = scopedEvent.serverRef,
+                workspaceKey = scopedEvent.workspaceKey,
+                sessionTitle = pending?.sessionTitle,
+                question = pending?.question,
+            )
+        }
     }
 
     private fun handleStatus(scopedEvent: ScopedEvent, event: OpenCodeEvent.SessionStatusChanged) {
@@ -136,20 +228,60 @@ class NotificationEventObserver constructor(
     }
 
     private fun complete(route: NotificationRoute) {
-        if (completionTracker.complete(route)) showCompletionFeedback(route)
+        if (completionTracker.complete(route)) {
+            showCompletionFeedback(route)
+        } else {
+            NotificationDiagnostics.record("completion skipped: no busy run tracked")
+        }
     }
 
     private fun showCompletionFeedback(route: NotificationRoute) {
         // Turn-complete is not a "mention": only the All routing mode delivers it.
-        if (!shouldDeliverCompletion(routingModeFor(route.serverRef))) return
+        if (!shouldDeliverCompletion(routingModeFor(route.serverRef))) {
+            NotificationDiagnostics.record("completion skipped: routing mode")
+            return
+        }
         if (cachedSettings.notifyOnCompletion) {
             hapticFeedback.vibrate(cachedSettings.vibrationPattern)
-            notificationHelper.showCompletionNotification(
-                sessionId = route.sessionId,
-                serverRef = route.serverRef,
-                workspaceKey = route.workspaceKey,
-                sessionTitle = null,
-            )
+            scope.launch {
+                val summary = serverConnectionRegistry.completionSummary(
+                    serverRef = route.serverRef,
+                    workspaceKey = route.workspaceKey,
+                    sessionId = route.sessionId,
+                )
+                NotificationDiagnostics.record(
+                    "completion notification for ${route.sessionId.takeLast(SESSION_ID_SUFFIX)}" +
+                        if (summary?.body == null) " (no text)" else ""
+                )
+                notificationHelper.showCompletionNotification(
+                    sessionId = route.sessionId,
+                    serverRef = route.serverRef,
+                    workspaceKey = route.workspaceKey,
+                    sessionTitle = summary?.sessionTitle,
+                    body = summary?.body,
+                )
+            }
+        }
+    }
+
+    /**
+     * A run can finish while the SSE stream is down (network drop, server restart). The live
+     * event never arrives, so on reconnect ask the server for the status of every session that
+     * was busy and post the completion for those that settled in the meantime.
+     */
+    private fun catchUpMissedCompletions() {
+        val routes = completionTracker.busyRoutes()
+        if (routes.isEmpty()) return
+        scope.launch {
+            routes.forEach { route ->
+                val statuses = serverConnectionRegistry.sessionStatuses(route.serverRef, route.workspaceKey)
+                    ?: return@forEach
+                val status = statuses[route.sessionId]
+                if (status == null || status.type == "idle") {
+                    NotificationDiagnostics.record("catch-up completion for ${route.sessionId}")
+                    if (completionTracker.complete(route)) showCompletionFeedback(route)
+                }
+            }
         }
     }
 
@@ -179,6 +311,8 @@ internal class CompletionTracker {
     }
 
     fun complete(route: NotificationRoute): Boolean = busySessions.remove(route)
+
+    fun busyRoutes(): List<NotificationRoute> = busySessions.toList()
 
     fun clear() {
         busySessions.clear()

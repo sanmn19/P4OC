@@ -21,12 +21,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.core.content.ContextCompat
@@ -41,6 +43,10 @@ import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.datastore.VibrationPattern
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
+import dev.blazelight.p4oc.core.notification.NotificationDiagnostics
+import dev.blazelight.p4oc.core.notification.NotificationHelper
+import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.components.TuiAlertDialog
 import dev.blazelight.p4oc.ui.components.TuiButton
 import dev.blazelight.p4oc.ui.components.TuiDropdownMenuItem
@@ -50,6 +56,7 @@ import dev.blazelight.p4oc.ui.components.TuiTopBar
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,10 +64,14 @@ import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
 private const val DISABLED_ROUTING_ALPHA = 0.4f
+private const val TEST_BACKGROUND_DELAY_MS = 10_000L
+private const val DIAGNOSTICS_REFRESH_MS = 1_000L
+private const val DIAGNOSTICS_LINE_COUNT = 12
 
 class NotificationSettingsViewModel constructor(
     private val settingsDataStore: SettingsDataStore,
     private val hapticFeedback: HapticFeedback,
+    private val notificationHelper: NotificationHelper,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(NotificationSettings())
@@ -138,6 +149,29 @@ class NotificationSettingsViewModel constructor(
 
     fun previewVibration(pattern: VibrationPattern) {
         hapticFeedback.preview(pattern)
+    }
+
+    /** Posts the same notifications the event pipeline posts, for on-device diagnosis. */
+    fun sendTestNotification() {
+        val saved = _savedServers.value.firstOrNull()
+        val serverRef = saved?.let { ServerRef.fromEndpointKey(it.endpointKey, it.displayName) }
+            ?: ServerRef.fromEndpoint("https://test.invalid:4096", "Test server")
+        notificationHelper.showQuestionNotification(
+            sessionId = "ses_notification_test",
+            serverRef = serverRef,
+            workspaceKey = WorkspaceKey.Global,
+            question = "Test notification: can you see this while the app is backgrounded?",
+        )
+        // The delayed one lands while the app is backgrounded, which is the case to diagnose.
+        viewModelScope.launch {
+            delay(TEST_BACKGROUND_DELAY_MS)
+            notificationHelper.showCompletionNotification(
+                sessionId = "ses_notification_test",
+                serverRef = serverRef,
+                workspaceKey = WorkspaceKey.Global,
+                sessionTitle = "Test run finished (background)",
+            )
+        }
     }
 }
 
@@ -288,6 +322,8 @@ fun NotificationSettingsScreen(
             )
 
             NotificationRoutingSection(savedServers, settings, viewModel::setServerRouting)
+
+            DiagnosticsSection(onSendTest = viewModel::sendTestNotification)
         }
     }
 
@@ -691,4 +727,58 @@ private fun NotificationSwitch(
         thickness = Sizing.dividerThickness,
         color = theme.borderSubtle
     )
+}
+
+/**
+ * Shows what the notification pipeline last did (events seen, skips, posts) and a button that
+ * posts the same notifications directly, so a phone without logcat can tell delivery failures apart
+ * from event-arrival failures.
+ */
+@Suppress("FunctionNaming")
+@Composable
+private fun DiagnosticsSection(onSendTest: () -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    val clipboard = LocalClipboardManager.current
+    var lines by remember { mutableStateOf(NotificationDiagnostics.snapshot()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            lines = NotificationDiagnostics.snapshot()
+            delay(DIAGNOSTICS_REFRESH_MS)
+        }
+    }
+
+    SectionHeader(title = stringResource(R.string.notification_diagnostics))
+    Column(modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)) {
+        Text(
+            text = stringResource(R.string.notification_diagnostics_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = theme.textMuted,
+        )
+        Spacer(Modifier.height(Spacing.sm))
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            TuiButton(
+                onClick = onSendTest,
+                modifier = Modifier.testTag("notification_send_test"),
+            ) {
+                Text(stringResource(R.string.notification_send_test))
+            }
+            TuiTextButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(NotificationDiagnostics.snapshot().joinToString("\n")))
+                },
+                modifier = Modifier.testTag("notification_copy_diagnostics"),
+            ) {
+                Text(stringResource(R.string.notification_copy_diagnostics))
+            }
+        }
+        Spacer(Modifier.height(Spacing.sm))
+        lines.takeLast(DIAGNOSTICS_LINE_COUNT).forEach { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = theme.textMuted,
+            )
+        }
+    }
 }

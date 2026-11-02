@@ -20,7 +20,18 @@ import dev.blazelight.p4oc.ui.permission.PermissionDisplayFormatter
 private const val TAG = "NotificationHelper"
 
 internal const val MAX_NOTIFICATION_TEXT_CODE_POINTS = 512
+internal const val COMPLETION_BODY_CODE_POINTS = 160
 private const val NOTIFICATION_TEXT_ELLIPSIS = "…"
+
+/** First line of [text], trimmed to a short notification body. */
+internal fun String.shortExcerpt(): String {
+    val line = lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: trim()
+    return if (line.length <= COMPLETION_BODY_CODE_POINTS) {
+        line
+    } else {
+        line.take(COMPLETION_BODY_CODE_POINTS - 1) + NOTIFICATION_TEXT_ELLIPSIS
+    }
+}
 
 internal fun boundedNotificationText(text: String?, fallback: String): String {
     val resolved = text ?: fallback
@@ -125,6 +136,9 @@ class NotificationHelper constructor(
         ensureChannels(context)
     }
 
+    /** Context for callers that need to inspect notification permission/channels. */
+    fun context(): Context = context
+
     private data class ChatUpdate(val title: String, val text: String)
 
     /**
@@ -158,17 +172,22 @@ class NotificationHelper constructor(
         serverRef: ServerRef,
         workspaceKey: WorkspaceKey,
         question: String?,
+        sessionTitle: String? = null,
     ) {
         val route = NotificationRoute(sessionId, serverRef, workspaceKey)
         val questionText = boundedNotificationText(
             question,
             context.getString(R.string.notification_question_fallback),
         )
+        val titleText = boundedNotificationText(
+            sessionTitle,
+            context.getString(R.string.notification_question_title),
+        )
         postChatNotification(
             route = route,
             identity = NotificationRouteCodec.identity(NotificationKind.Question, route),
             notificationId = QUESTION_NOTIFICATION_ID,
-            update = ChatUpdate(context.getString(R.string.notification_question_title), questionText),
+            update = ChatUpdate(titleText, questionText),
             silent = false,
         )
     }
@@ -178,17 +197,22 @@ class NotificationHelper constructor(
         serverRef: ServerRef,
         workspaceKey: WorkspaceKey,
         sessionTitle: String?,
+        body: String? = null,
     ) {
         val route = NotificationRoute(sessionId, serverRef, workspaceKey)
-        val sessionText = boundedNotificationText(
+        val titleText = boundedNotificationText(
             sessionTitle,
+            context.getString(R.string.notification_completion_title),
+        )
+        val sessionText = boundedNotificationText(
+            body?.shortExcerpt(),
             context.getString(R.string.notification_completion_fallback),
         )
         postChatNotification(
             route = route,
             identity = NotificationRouteCodec.identity(NotificationKind.Completion, route),
             notificationId = COMPLETION_NOTIFICATION_ID,
-            update = ChatUpdate(context.getString(R.string.notification_completion_title), sessionText),
+            update = ChatUpdate(titleText, sessionText),
             silent = true,
         )
     }
@@ -244,7 +268,9 @@ class NotificationHelper constructor(
             val manager = NotificationManagerCompat.from(context)
             manager.notify(identity, notificationId, notification)
             manager.notify("$chatKey:summary", CHAT_SUMMARY_NOTIFICATION_ID, chatSummary(route, chatKey, updates))
+            NotificationDiagnostics.record("posted ${update.title}")
         } catch (e: SecurityException) {
+            NotificationDiagnostics.record("post failed: ${e::class.simpleName}")
             AppLog.w(TAG, "Notification post failed (${e::class.simpleName})")
         }
     }

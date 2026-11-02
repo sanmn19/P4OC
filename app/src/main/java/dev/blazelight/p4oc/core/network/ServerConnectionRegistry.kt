@@ -3,8 +3,10 @@
 package dev.blazelight.p4oc.core.network
 
 import dev.blazelight.p4oc.core.datastore.SavedServer
+import dev.blazelight.p4oc.core.notification.NotificationDiagnostics
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.data.remote.dto.ProjectDto
+import dev.blazelight.p4oc.data.remote.dto.SessionStatusDto
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.server.ScopedEvent
 import dev.blazelight.p4oc.domain.server.ServerGeneration
@@ -250,6 +252,83 @@ class ServerConnectionRegistry constructor(
         connect(server, password ?: settingsDataStore.getSavedServerPassword(server))
     }
 
+    /** Session statuses for one workspace, used to catch up after an SSE gap. */
+    suspend fun sessionStatuses(
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
+    ): Map<String, SessionStatusDto>? {
+        val connection = connections[serverRef.endpointKey]?.value ?: return null
+        val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
+        return runCatching {
+            connection.api.getSessionStatuses(directory = directory, workspace = null)
+        }.getOrNull()
+    }
+
+    data class PendingQuestion(val sessionTitle: String?, val question: String?)
+
+    data class CompletionSummary(val sessionTitle: String?, val body: String?)
+
+    /** Chat name plus a short excerpt of the last assistant text, for completion notifications. */
+    @Suppress("ReturnCount")
+    suspend fun completionSummary(
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
+        sessionId: String,
+    ): CompletionSummary? {
+        val connection = connections[serverRef.endpointKey]?.value ?: return null
+        val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
+        val sessionTitle = runCatching {
+            connection.api.getSession(sessionId, directory, null).title
+        }.getOrNull()
+        val body = runCatching {
+            connection.api.getMessages(sessionId, null, null, directory, null)
+                .asReversed()
+                .firstNotNullOfOrNull { message ->
+                    message.parts.firstOrNull { it.type == "text" }?.text
+                        ?.takeIf { message.info.role == "assistant" && it.isNotBlank() }
+                }
+        }.getOrNull()
+        if (sessionTitle == null && body == null) return null
+        return CompletionSummary(sessionTitle, body)
+    }
+
+    /** Chat name for a session, used as the notification title. */
+    suspend fun sessionTitle(
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
+        sessionId: String,
+    ): String? {
+        val connection = connections[serverRef.endpointKey]?.value ?: return null
+        val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
+        return runCatching {
+            connection.api.getSession(sessionId, directory, null).title
+        }.getOrNull()
+    }
+
+    /** Chat name plus question text of the first pending v2 form, if any. */
+
+    @Suppress("ReturnCount")
+    suspend fun pendingQuestion(
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
+        sessionId: String,
+    ): PendingQuestion? {
+        val connection = connections[serverRef.endpointKey]?.value ?: return null
+        val api = connection.api as? V2WorkspaceOpenCodeApi ?: return null
+        val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
+        val sessionTitle = sessionTitle(serverRef, workspaceKey, sessionId)
+        val form = runCatching {
+            api.forms.listSessionForms(sessionId, directory).firstOrNull()
+        }.getOrNull()
+        val question = form?.title?.takeIf(String::isNotBlank)
+            ?: form?.fields?.firstOrNull { it.hidden != true }?.title
+        if (question == null && sessionTitle == null) {
+            NotificationDiagnostics.record("form lookup failed for ${sessionId.takeLast(SESSION_ID_SUFFIX)}")
+            return null
+        }
+        return PendingQuestion(sessionTitle, question)
+    }
+
     fun disconnect(serverRef: ServerRef) {
         connectJobs.remove(serverRef.endpointKey)?.cancel()
         stateCollectors.remove(serverRef.endpointKey).let { collector ->
@@ -442,6 +521,7 @@ class ServerConnectionRegistry constructor(
     private data class GenerationKey(val endpointKey: String, val generation: ServerGeneration)
 
     private companion object {
+        const val SESSION_ID_SUFFIX = 6
         val STALE_GENERATION_ERROR = ConnectionState.Error("Server connection generation is no longer available")
     }
 }

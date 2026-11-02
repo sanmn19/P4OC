@@ -3,6 +3,7 @@ package dev.blazelight.p4oc
 import android.app.Application
 import dev.blazelight.p4oc.core.connection.ConnectionForegroundCoordinator
 import dev.blazelight.p4oc.core.log.CrashRecorder
+import dev.blazelight.p4oc.core.notification.NotificationDiagnostics
 import dev.blazelight.p4oc.core.notification.NotificationEventObserver
 import dev.blazelight.p4oc.di.allModules
 import org.koin.android.ext.android.inject
@@ -25,6 +26,7 @@ class PocketCodeApp : Application() {
             modules(allModules)
         }
 
+        NotificationDiagnostics.attach(this)
         notificationEventObserver.start()
         connectionForegroundCoordinator.start()
     }

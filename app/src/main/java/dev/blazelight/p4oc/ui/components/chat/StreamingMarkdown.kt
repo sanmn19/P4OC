@@ -393,7 +393,7 @@ internal fun styleCode(
     }
 }
 
-private fun inlineMarkdown(text: String, colors: MarkdownRenderColors): AnnotatedString = buildAnnotatedString {
+internal fun inlineMarkdown(text: String, colors: MarkdownRenderColors): AnnotatedString = buildAnnotatedString {
     var index = 0
     while (index < text.length) {
         val codeStart = text.indexOf('`', index)
@@ -401,60 +401,83 @@ private fun inlineMarkdown(text: String, colors: MarkdownRenderColors): Annotate
         val boldStart = text.indexOf("**", index)
         val next = listOf(codeStart, linkStart, boldStart).filter { it >= 0 }.minOrNull() ?: -1
         if (next == -1) {
-            appendInline(text.substring(index), colors)
+            appendLinked(text.substring(index), colors)
             break
         }
-        if (next > index) appendInline(text.substring(index, next), colors)
-        when (next) {
-            codeStart -> {
-                val end = text.indexOf('`', codeStart + 1)
-                if (end == -1) {
-                    appendInline(text.substring(codeStart), colors)
-                    break
-                }
-                withStyle(
-                    SpanStyle(
-                        fontFamily = FontFamily.Monospace,
-                        background = colors.inlineCodeBackground,
-                    )
-                ) {
-                    append(text.substring(codeStart + 1, end))
-                }
-                index = end + 1
-            }
-            boldStart -> {
-                val end = text.indexOf("**", boldStart + 2)
-                if (end == -1) {
-                    appendInline(text.substring(boldStart), colors)
-                    break
-                }
-                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = colors.strong)) {
-                    append(text.substring(boldStart + 2, end))
-                }
-                index = end + 2
-            }
-            else -> {
-                val close = text.indexOf(']', linkStart + 1)
-                val openUrl = if (close != -1) text.indexOf('(', close + 1) else -1
-                val closeUrl = if (openUrl != -1 && openUrl == close + 1) text.indexOf(')', openUrl + 1) else -1
-                if (closeUrl == -1) {
-                    appendInline(text.substring(linkStart, linkStart + 1), colors)
-                    index = linkStart + 1
-                } else {
-                    val label = text.substring(linkStart + 1, close)
-                    val url = text.substring(openUrl + 1, closeUrl)
-                    if (url.isSafeLinkUrl()) {
-                        withLink(LinkAnnotation.Url(url, linkStyles(colors))) {
-                            append(label)
-                        }
-                    } else {
-                        append(text.substring(linkStart, closeUrl + 1))
-                    }
-                    index = closeUrl + 1
-                }
-            }
+        if (next > index) appendLinked(text.substring(index, next), colors)
+        index = when (next) {
+            codeStart -> appendCodeSpan(text, codeStart, colors)
+            boldStart -> appendBold(text, boldStart, colors)
+            else -> appendMarkdownLink(text, linkStart, colors)
         }
     }
+}
+
+/** Appends an inline code span and returns the index after it. */
+private fun AnnotatedString.Builder.appendCodeSpan(
+    text: String,
+    start: Int,
+    colors: MarkdownRenderColors,
+): Int {
+    val end = text.indexOf('`', start + 1)
+    if (end == -1) {
+        appendLinked(text.substring(start), colors)
+        return start + 1
+    }
+    withStyle(
+        SpanStyle(
+            fontFamily = FontFamily.Monospace,
+            background = colors.inlineCodeBackground,
+        )
+    ) {
+        // URLs are often written as inline code (e.g. `http://host:4096`); they stay
+        // tappable while keeping the code styling around them.
+        appendLinked(text.substring(start + 1, end), colors)
+    }
+    return end + 1
+}
+
+/** Appends a **bold** run and returns the index after it. */
+private fun AnnotatedString.Builder.appendBold(
+    text: String,
+    start: Int,
+    colors: MarkdownRenderColors,
+): Int {
+    val end = text.indexOf("**", start + 2)
+    if (end == -1) {
+        appendLinked(text.substring(start), colors)
+        return start + 1
+    }
+    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = colors.strong)) {
+        // Bold prose often carries the important link (e.g. a PR title plus its URL).
+        appendLinked(text.substring(start + 2, end), colors)
+    }
+    return end + 2
+}
+
+/** Appends a [label](url) link and returns the index after it. */
+private fun AnnotatedString.Builder.appendMarkdownLink(
+    text: String,
+    start: Int,
+    colors: MarkdownRenderColors,
+): Int {
+    val close = text.indexOf(']', start + 1)
+    val openUrl = if (close != -1) text.indexOf('(', close + 1) else -1
+    val closeUrl = if (openUrl != -1 && openUrl == close + 1) text.indexOf(')', openUrl + 1) else -1
+    if (closeUrl == -1) {
+        appendLinked(text.substring(start, start + 1), colors)
+        return start + 1
+    }
+    val label = text.substring(start + 1, close)
+    val url = text.substring(openUrl + 1, closeUrl)
+    if (url.isSafeLinkUrl()) {
+        withLink(LinkAnnotation.Url(url, linkStyles(colors))) {
+            append(label)
+        }
+    } else {
+        append(text.substring(start, closeUrl + 1))
+    }
+    return closeUrl + 1
 }
 
 private val URL_REGEX = Regex("""https?://[^\s<>()\[\]{}]+""")
@@ -467,7 +490,8 @@ private fun linkStyles(colors: MarkdownRenderColors) = TextLinkStyles(
 private fun String.isSafeLinkUrl(): Boolean =
     startsWith("https://") || startsWith("http://") || startsWith("mailto:")
 
-private fun AnnotatedString.Builder.appendInline(text: String, colors: MarkdownRenderColors) {
+/** Appends [text] verbatim, turning URL runs into tappable links. */
+private fun AnnotatedString.Builder.appendLinked(text: String, colors: MarkdownRenderColors) {
     if (text.isEmpty()) return
     var cursor = 0
     for (match in URL_REGEX.findAll(text)) {
@@ -527,7 +551,7 @@ private const val MARKER_BULLET = "•"
 /** Maximum visual indentation steps rendered for nested lists, keeping the gutter bounded on phones. */
 private const val MAX_VISUAL_INDENT_LEVELS = 4
 
-private data class MarkdownRenderColors(
+internal data class MarkdownRenderColors(
     val text: androidx.compose.ui.graphics.Color,
     val heading: androidx.compose.ui.graphics.Color,
     val strong: androidx.compose.ui.graphics.Color,
