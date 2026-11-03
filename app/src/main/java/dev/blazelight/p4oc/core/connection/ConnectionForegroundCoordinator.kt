@@ -47,6 +47,9 @@ class ConnectionForegroundCoordinator constructor(
     @Volatile
     private var savedServers: List<ServerRef> = emptyList()
 
+    @Volatile
+    private var startRequested = false
+
     fun start() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         scope.launch {
@@ -67,12 +70,24 @@ class ConnectionForegroundCoordinator constructor(
     }
 
     override fun onStart(owner: LifecycleOwner) {
+        startRequested = false
         NotificationDiagnostics.record("FGS stop requested (app foreground)")
         context.stopService(Intent(context, LiveConnectionService::class.java))
         NotificationHelper.dismissLiveConnection(context)
     }
 
+    override fun onPause(owner: LifecycleOwner) {
+        startIfConnected()
+    }
+
     override fun onStop(owner: LifecycleOwner) {
+        // Fallback for transitions that skip ON_PAUSE (e.g. some OEM quick-lock flows).
+        startIfConnected()
+    }
+
+    @Suppress("ReturnCount")
+    private fun startIfConnected() {
+        if (startRequested) return
         if (!keepLiveInBackground) {
             NotificationDiagnostics.record("FGS start skipped: keep-live off")
             return
@@ -85,6 +100,7 @@ class ConnectionForegroundCoordinator constructor(
         }
         try {
             context.startForegroundService(intent(context, connected.displayName))
+            startRequested = true
             NotificationDiagnostics.record("FGS start requested (${connected.displayName})")
             AppLog.d(TAG, "Started live connection service for ${connected.displayName}")
         } catch (_: IllegalStateException) {

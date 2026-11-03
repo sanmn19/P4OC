@@ -506,8 +506,13 @@ class WorkspaceClient(
         val responseBody = body() ?: throw kotlinx.serialization.SerializationException("Missing response body")
         decode(responseBody.readUtf8BoundedCancellable(maxResponseBytes, tooLargeMessage))
     } finally {
-        body()?.close()
-        errorBody()?.close()
+        body()?.closeQuietly()
+        errorBody()?.closeQuietly()
+    }
+
+    /** Close without letting Okio's timeout bookkeeping surface as a crash. */
+    private fun ResponseBody.closeQuietly() {
+        runCatching { close() }
     }
 
     private suspend fun ResponseBody.readUtf8BoundedCancellable(
@@ -516,7 +521,10 @@ class WorkspaceClient(
     ): String =
         withContext(Dispatchers.IO) {
             suspendCancellableCoroutine { continuation ->
-                continuation.invokeOnCancellation { close() }
+                // closeQuietly, not close(): closing while the reader thread is inside read()
+                // makes Okio's AsyncTimeout throw "Unbalanced enter/exit", and an exception from a
+                // cancellation handler is rethrown as CompletionHandlerException (crash).
+                continuation.invokeOnCancellation { closeQuietly() }
                 continuation.resumeWith(
                     runCatching { readUtf8Bounded(maxResponseBytes, tooLargeMessage) },
                 )
@@ -528,7 +536,8 @@ class WorkspaceClient(
         tooLargeMessage: String,
     ): ByteArray = withContext(Dispatchers.IO) {
         suspendCancellableCoroutine { continuation ->
-            continuation.invokeOnCancellation { close() }
+            // See readUtf8BoundedCancellable: the cancellation handler must never throw.
+            continuation.invokeOnCancellation { closeQuietly() }
             continuation.resumeWith(runCatching { readBytesBounded(maxResponseBytes, tooLargeMessage) })
         }
     }

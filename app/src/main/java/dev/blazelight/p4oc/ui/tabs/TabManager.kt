@@ -3,6 +3,7 @@ package dev.blazelight.p4oc.ui.tabs
 import dev.blazelight.p4oc.core.datastore.PersistedTab
 import dev.blazelight.p4oc.core.datastore.PersistedTabState
 import dev.blazelight.p4oc.core.datastore.PersistedWorkspaceKey
+import dev.blazelight.p4oc.core.notification.NotificationRoute
 import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.navigation.Screen
@@ -165,17 +166,28 @@ class TabManager {
             it.sessionId == sessionId
     }
 
-    fun findTabByNotificationRoute(route: dev.blazelight.p4oc.core.notification.NotificationRoute): TabInstance? =
-        _tabs.value.find {
-            it.sessionId == route.sessionId &&
-                it.serverRef?.endpointKey == route.serverRef.endpointKey &&
-                it.workspaceKey == route.workspaceKey
-        }
+    /**
+     * The tab already showing [route]'s chat, if any. Notification routes may carry the
+     * server-global workspace (events without a directory), so a tab bound to the chat's real
+     * workspace still counts; one chat never gets a second tab.
+     */
+    fun findTabByNotificationRoute(route: NotificationRoute): TabInstance? {
+        val chatRoute = TabChatRouteCodec.chatRoute(route.sessionId)
+        val candidates = _tabs.value.filter { it.showsChat(route, chatRoute) }
+        // Prefer the exact workspace, but a session lives in exactly one workspace: a route that
+        // carries the server-global workspace must still focus the chat's existing tab.
+        return candidates.firstOrNull { it.workspaceKey == route.workspaceKey }
+            ?: candidates.firstOrNull()
+    }
 
     /**
      * Update a tab's session binding.
      * Call when navigating to/from a chat screen within a tab.
      */
+    private fun TabInstance.showsChat(route: NotificationRoute, chatRoute: String): Boolean =
+        serverRef?.endpointKey == route.serverRef.endpointKey &&
+            (sessionId == route.sessionId || startRoute.substringBefore('?') == chatRoute)
+
     fun updateTabSession(tabId: String, sessionId: String?, sessionTitle: String? = null) {
         _tabs.update { tabs ->
             tabs.map { tab ->
