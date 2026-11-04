@@ -1251,6 +1251,13 @@ object MainTabScreen {
             onNotificationRouteConsumed(route)
         }
 
+        dev.blazelight.p4oc.ui.share.SharePickerHost(
+            owners = tabMaps.workspaceOwners.values,
+            tabManager = deps.tabManager,
+            shareInbox = koinInject(),
+            scope = deps.coroutineScope,
+        )
+
         mainTabRestoreEffect(deps, savedServers, uiState)
         savedServerConnectionEffect(deps.serverConnectionRegistry, savedServers)
         mainTabPersistEffect(deps, tabs, activeTabId)
