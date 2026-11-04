@@ -69,6 +69,12 @@ val appModule = module {
     // Core services
     single { SettingsDataStore(androidContext(), get()) }
     single { NotificationHelper(androidContext()) }
+    single { dev.blazelight.p4oc.core.share.ShareInbox() }
+    single<dev.blazelight.p4oc.ui.screens.files.upload.UploadSource> {
+        dev.blazelight.p4oc.ui.screens.files.upload.ContentResolverUploadSource(
+            androidContext().contentResolver,
+        )
+    }
     single { NotificationEventObserver(get(), get(), get(), get()) }
     single { HapticFeedback(androidContext()) }
 
@@ -164,6 +170,8 @@ val viewModelModule = module {
             get(),
             get(),
             get<ModelSelectionCoordinator>(),
+            get(),
+            get(),
             get(),
         )
     }
