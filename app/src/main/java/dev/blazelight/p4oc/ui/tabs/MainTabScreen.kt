@@ -707,6 +707,28 @@ private fun rememberHomeSessionActionRouter(
     )
 }
 
+/**
+ * Workspace a notification's chat belongs to. The route itself may be server-global (events without a
+ * directory), so fall back to the loaded session, then to the server's copy of the session.
+ */
+@Suppress("ReturnCount")
+private suspend fun resolveChatWorkspace(
+    route: dev.blazelight.p4oc.core.notification.NotificationRoute,
+    serverRef: ServerRef,
+    owners: Collection<dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner>,
+): WorkspaceKey {
+    if (route.workspaceKey != WorkspaceKey.Global) return route.workspaceKey
+    val loaded = owners.firstNotNullOfOrNull { owner ->
+        owner.sessionRepository.state.value.snapshot.sessions[route.sessionId]?.workspace?.key
+    }
+    if (loaded != null) return loaded
+    val owner = owners.firstOrNull { it.workspace.server == serverRef } ?: return route.workspaceKey
+    val directory = runCatching {
+        owner.workspaceClient.getSession(route.sessionId).directory
+    }.getOrNull()
+    return directory?.let(WorkspaceKey::Directory) ?: route.workspaceKey
+}
+
 @Composable
 private fun rememberMainTabDeps(): MainTabDeps {
     val tabManager: TabManager = koinInject()
@@ -1235,14 +1257,20 @@ object MainTabScreen {
             val route = notificationRoute ?: return@LaunchedEffect
             val ownedServer = findSavedServerForNotification(route, savedServers)
             if (ownedServer != null) {
-                val existing = deps.tabManager.findTabByNotificationRoute(route)
+                val serverRef = ServerRef.fromEndpointKey(ownedServer.endpointKey, ownedServer.displayName)
+                // Server-scoped events carry no directory; open the chat in the session's own
+                // workspace so attachments and uploads have a project directory.
+                val workspaceKey = resolveChatWorkspace(route, serverRef, tabMaps.workspaceOwners.values)
+                val chatRoute = Screen.Chat.createRoute(route.sessionId)
+                val existing = deps.tabManager.findSessionTab(serverRef, workspaceKey, route.sessionId)
+                    ?: deps.tabManager.findTabByNotificationRoute(route)
                 if (existing != null) {
                     deps.tabManager.focusTab(existing.id)
                 } else {
                     deps.tabManager.createTab(
-                        startRoute = Screen.Chat.createRoute(route.sessionId),
-                        workspaceKey = route.workspaceKey,
-                        serverRef = ServerRef.fromEndpointKey(ownedServer.endpointKey, ownedServer.displayName),
+                        startRoute = chatRoute,
+                        workspaceKey = workspaceKey,
+                        serverRef = serverRef,
                         focus = true,
                     )
                 }
@@ -1250,6 +1278,13 @@ object MainTabScreen {
             // Missing/removed servers safely fall back to the current screen; never guess another owner.
             onNotificationRouteConsumed(route)
         }
+
+        dev.blazelight.p4oc.ui.share.SharePickerHost(
+            owners = tabMaps.workspaceOwners.values,
+            tabManager = deps.tabManager,
+            shareInbox = koinInject(),
+            scope = deps.coroutineScope,
+        )
 
         mainTabRestoreEffect(deps, savedServers, uiState)
         savedServerConnectionEffect(deps.serverConnectionRegistry, savedServers)
