@@ -116,6 +116,7 @@ import dev.blazelight.p4oc.domain.workspace.WorkspaceAttribution
 import dev.blazelight.p4oc.ui.components.status.connectionStatusColor
 import dev.blazelight.p4oc.ui.components.status.connectionStatusDescription
 import dev.blazelight.p4oc.ui.components.status.connectionStatusLabel
+import dev.blazelight.p4oc.ui.navigation.PendingIntents
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.home.HomeActions
 import dev.blazelight.p4oc.ui.screens.home.HomeSessionActions
@@ -143,10 +144,12 @@ import dev.blazelight.p4oc.ui.workspace.workspaceActionGestures
 import dev.blazelight.p4oc.ui.workspace.workspaceActionMenu
 import dev.blazelight.p4oc.ui.workspace.workspaceClientDirectoryBrowser
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
+private const val OPEN_LATEST_CHAT_ATTEMPTS = 10
+private const val OPEN_LATEST_CHAT_RETRY_MS = 300L
 private const val TAG = "MainTabScreen"
 
 private fun showMainTabMessage(scope: CoroutineScope, host: SnackbarHostState, message: String) {
@@ -707,6 +710,28 @@ private fun rememberHomeSessionActionRouter(
     )
 }
 
+/**
+ * Workspace a notification's chat belongs to. The route itself may be server-global (events without a
+ * directory), so fall back to the loaded session, then to the server's copy of the session.
+ */
+@Suppress("ReturnCount")
+private suspend fun resolveChatWorkspace(
+    route: dev.blazelight.p4oc.core.notification.NotificationRoute,
+    serverRef: ServerRef,
+    owners: Collection<dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner>,
+): WorkspaceKey {
+    if (route.workspaceKey != WorkspaceKey.Global) return route.workspaceKey
+    val loaded = owners.firstNotNullOfOrNull { owner ->
+        owner.sessionRepository.state.value.snapshot.sessions[route.sessionId]?.workspace?.key
+    }
+    if (loaded != null) return loaded
+    val owner = owners.firstOrNull { it.workspace.server == serverRef } ?: return route.workspaceKey
+    val directory = runCatching {
+        owner.workspaceClient.getSession(route.sessionId).directory
+    }.getOrNull()
+    return directory?.let(WorkspaceKey::Directory) ?: route.workspaceKey
+}
+
 @Composable
 private fun rememberMainTabDeps(): MainTabDeps {
     val tabManager: TabManager = koinInject()
@@ -1190,8 +1215,7 @@ object MainTabScreen {
     @Composable
     @Suppress("LongMethod")
     operator fun invoke(
-        pendingNotificationRoute: StateFlow<NotificationRoute?>,
-        onNotificationRouteConsumed: (NotificationRoute) -> Unit,
+        pendingIntents: PendingIntents,
         onDisconnect: () -> Unit,
         onSettings: () -> Unit = {},
         modifier: Modifier = Modifier,
@@ -1230,25 +1254,74 @@ object MainTabScreen {
         val savedServerExists = rememberSavedServerExists(savedServers)
         val connectSavedServer = rememberConnectSavedServer(deps.serverConnectionRegistry, savedServers)
 
-        val notificationRoute by pendingNotificationRoute.collectAsStateWithLifecycle()
+        val notificationRoute by pendingIntents.notificationRoute.collectAsStateWithLifecycle()
         LaunchedEffect(notificationRoute, savedServers) {
             val route = notificationRoute ?: return@LaunchedEffect
             val ownedServer = findSavedServerForNotification(route, savedServers)
             if (ownedServer != null) {
-                val existing = deps.tabManager.findTabByNotificationRoute(route)
+                val serverRef = ServerRef.fromEndpointKey(ownedServer.endpointKey, ownedServer.displayName)
+                // Server-scoped events carry no directory; open the chat in the session's own
+                // workspace so attachments and uploads have a project directory.
+                val workspaceKey = resolveChatWorkspace(route, serverRef, tabMaps.workspaceOwners.values)
+                val chatRoute = Screen.Chat.createRoute(route.sessionId)
+                val existing = deps.tabManager.findSessionTab(serverRef, workspaceKey, route.sessionId)
+                    ?: deps.tabManager.findTabByNotificationRoute(route)
                 if (existing != null) {
                     deps.tabManager.focusTab(existing.id)
                 } else {
                     deps.tabManager.createTab(
-                        startRoute = Screen.Chat.createRoute(route.sessionId),
-                        workspaceKey = route.workspaceKey,
-                        serverRef = ServerRef.fromEndpointKey(ownedServer.endpointKey, ownedServer.displayName),
+                        startRoute = chatRoute,
+                        workspaceKey = workspaceKey,
+                        serverRef = serverRef,
                         focus = true,
                     )
                 }
             }
             // Missing/removed servers safely fall back to the current screen; never guess another owner.
-            onNotificationRouteConsumed(route)
+            pendingIntents.onNotificationRouteConsumed(route)
+        }
+
+        dev.blazelight.p4oc.ui.share.SharePickerHost(
+            owners = tabMaps.workspaceOwners.values,
+            tabManager = deps.tabManager,
+            shareInbox = koinInject(),
+            scope = deps.coroutineScope,
+        )
+
+        val openLatest by pendingIntents.openLatestChat.collectAsStateWithLifecycle()
+        LaunchedEffect(openLatest) {
+            if (!openLatest) return@LaunchedEffect
+            // The workspace snapshots load asynchronously after a cold start; retry briefly.
+            repeat(OPEN_LATEST_CHAT_ATTEMPTS) {
+                val latest = tabMaps.workspaceOwners.values
+                    .flatMap { owner ->
+                        owner.sessionRepository.state.value.snapshot.sessions.values
+                            .map { session -> owner to session }
+                    }
+                    .maxByOrNull { (_, session) -> session.session.updatedAt }
+                if (latest != null) {
+                    val (owner, session) = latest
+                    val existing = deps.tabManager.findSessionTab(
+                        owner.workspace.server,
+                        session.workspace.key,
+                        session.session.id,
+                    )
+                    if (existing != null) {
+                        deps.tabManager.focusTab(existing.id)
+                    } else {
+                        deps.tabManager.createTab(
+                            startRoute = Screen.Chat.createRoute(session.session.id),
+                            workspaceKey = session.workspace.key,
+                            serverRef = owner.workspace.server,
+                            focus = true,
+                        )
+                    }
+                    pendingIntents.onOpenLatestChatConsumed()
+                    return@LaunchedEffect
+                }
+                delay(OPEN_LATEST_CHAT_RETRY_MS)
+            }
+            pendingIntents.onOpenLatestChatConsumed()
         }
 
         mainTabRestoreEffect(deps, savedServers, uiState)
