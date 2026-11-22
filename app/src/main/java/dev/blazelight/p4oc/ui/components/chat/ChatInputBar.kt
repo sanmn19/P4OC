@@ -12,6 +12,9 @@ import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -548,11 +551,11 @@ private fun ComposerVoiceButton(
             if (preparing) {
                 TuiLoadingIndicator()
             } else {
-                Text(
-                    text = if (listening) "◉" else "◌",
-                    color = if (listening) theme.background else theme.textMuted,
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.titleMedium,
+                Icon(
+                    imageVector = if (listening) Icons.Default.GraphicEq else Icons.Default.Mic,
+                    contentDescription = null,
+                    tint = if (listening) theme.background else theme.textMuted,
+                    modifier = Modifier.size(Sizing.iconMd),
                 )
             }
         }

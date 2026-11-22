@@ -646,7 +646,7 @@ fun ChatScreen(
                                     voiceState.phase ==
                                         dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Listening
                                 if (listening) {
-                                    voiceController.stop { text ->
+                                    voiceController.stopAndSend { text ->
                                         viewModel.updateInput(text)
                                         viewModel.sendMessage()
                                     }
