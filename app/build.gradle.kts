@@ -32,6 +32,8 @@ android {
         }
     }
 
+    ndkVersion = "28.2.13676358"
+
     defaultConfig {
         applicationId = "dev.blazelight.p4oc"
         minSdk = 26
@@ -40,6 +42,25 @@ android {
         versionName = "0.16.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            // whisper.cpp is only shipped for 64-bit ARM (phones and the arm64 emulator).
+            abiFilters += listOf("arm64-v8a")
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_STL=c++_shared")
+                cppFlags += listOf("-O3", "-fno-finite-math-only")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {

@@ -390,6 +390,9 @@ class WorkspaceChangesPresentationTest {
             return FileOperationResult.Failed("not used")
         }
 
+        override suspend fun createWorkspaceDirectory(absolutePath: String): FileOperationResult<Unit> =
+            FileOperationResult.Failed("not used")
+
         override suspend fun createDirectory(path: String): FileOperationResult<Unit> {
             mutationCallCount += 1
             return FileOperationResult.Failed("not used")

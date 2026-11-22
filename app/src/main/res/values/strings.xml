@@ -942,6 +942,20 @@
     <string name="cd_custom_answer">Type custom answer</string>
 
     <!-- Notification Settings (Feature 2) -->
+    <string name="settings_voice">Voice</string>
+    <string name="settings_voice_desc">On-device speech to text</string>
+    <string name="voice_assistant_section">Voice assistant</string>
+    <string name="voice_assistant_whisper">Whisper (on-device)</string>
+    <string name="voice_assistant_whisper_desc">OpenAI Whisper via whisper.cpp, runs on the phone</string>
+    <string name="voice_models_section">Whisper model</string>
+    <string name="voice_models_note">Models download once and stay on the device. Larger models are more accurate but slower.</string>
+    <string name="voice_model_download">Download</string>
+    <string name="voice_model_delete">Delete</string>
+    <string name="voice_model_retry">Retry</string>
+    <string name="chat_action_voice">Voice input</string>
+    <string name="chat_voice_listening">Listening…</string>
+    <string name="chat_voice_preparing">Loading model…</string>
+    <string name="chat_voice_unavailable">Voice input is unavailable</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_notifications_desc">Control notification behavior</string>
     <string name="notification_general">General</string>
