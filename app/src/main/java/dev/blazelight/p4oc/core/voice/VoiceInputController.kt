@@ -30,10 +30,7 @@ import kotlin.math.sqrt
  */
 class VoiceInputController(
     private val modelStore: WhisperModelStore,
-) {
-    enum class Phase { Idle, Preparing, Listening, Error }
-
-    data class State(val phase: Phase = Phase.Idle, val message: String? = null)
+) : VoiceController {
 
     private companion object {
         const val TAG = "VoiceInput"
@@ -53,8 +50,8 @@ class VoiceInputController(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val transcribeLock = Mutex()
-    private val _state = MutableStateFlow(State())
-    val state: StateFlow<State> = _state.asStateFlow()
+    private val _state = MutableStateFlow(VoiceInputState())
+    override val state: StateFlow<VoiceInputState> = _state.asStateFlow()
 
     private var sessionJob: Job? = null
 
@@ -65,33 +62,34 @@ class VoiceInputController(
     private var loadedModelId: String? = null
 
     @Suppress("TooGenericExceptionCaught")
-    fun start(model: WhisperModel, onText: (String) -> Unit) {
-        if (_state.value.phase == Phase.Listening || _state.value.phase == Phase.Preparing) return
+    override fun start(onText: (String) -> Unit) {
+        if (_state.value.phase == VoicePhase.Listening || _state.value.phase == VoicePhase.Preparing) return
+        val model = modelStore.selectedModel()
         if (!modelStore.isReady(model)) {
-            _state.value = State(Phase.Error, "Download a whisper model in Settings → Voice first.")
+            _state.value = VoiceInputState(VoicePhase.Error, "Download a whisper model in Settings → Voice first.")
             return
         }
-        _state.value = State(Phase.Preparing)
+        _state.value = VoiceInputState(VoicePhase.Preparing)
         stopping = false
         sessionJob?.cancel()
         sessionJob = scope.launch {
             try {
                 val engine = engineFor(model) ?: run {
-                    _state.value = State(Phase.Error, "Could not load the whisper model.")
+                    _state.value = VoiceInputState(VoicePhase.Error, "Could not load the whisper model.")
                     return@launch
                 }
                 val audio = openRecorder() ?: run {
-                    _state.value = State(Phase.Error, "Microphone unavailable.")
+                    _state.value = VoiceInputState(VoicePhase.Error, "Microphone unavailable.")
                     return@launch
                 }
                 audio.startRecording()
-                _state.value = State(Phase.Listening)
+                _state.value = VoiceInputState(VoicePhase.Listening)
                 runSession(engine, audio, onText)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
                 AppLog.w(TAG, "Voice input failed: ${error.javaClass.simpleName}")
-                _state.value = State(Phase.Error, "Voice input failed. Try again.")
+                _state.value = VoiceInputState(VoicePhase.Error, "Voice input failed. Try again.")
             } finally {
                 recorder?.runCatching { stop() }
                 recorder?.runCatching { release() }
@@ -101,22 +99,22 @@ class VoiceInputController(
     }
 
     /** Stops recording, transcribes the tail once and keeps the text in the field. */
-    fun stop(onText: (String) -> Unit) = finish(onText, send = false)
+    override fun stop(onText: (String) -> Unit) = finish(onText, send = false)
 
     /** Stops recording, transcribes the tail and hands the text to the caller for sending. */
-    fun stopAndSend(onText: (String) -> Unit) = finish(onText, send = true)
+    override fun stopAndSend(onText: (String) -> Unit) = finish(onText, send = true)
 
-    fun cancel() {
+    override fun cancel() {
         stopping = true
         sessionJob?.cancel()
         sessionJob = null
         recorder?.runCatching { stop() }
         recorder?.runCatching { release() }
         recorder = null
-        _state.value = State()
+        _state.value = VoiceInputState()
     }
 
-    fun release() {
+    override fun release() {
         cancel()
         transcriber?.close()
         transcriber = null
@@ -146,7 +144,7 @@ class VoiceInputController(
             } finally {
                 job.cancel()
                 sessionJob = null
-                _state.value = State()
+                _state.value = VoiceInputState()
             }
         }
     }

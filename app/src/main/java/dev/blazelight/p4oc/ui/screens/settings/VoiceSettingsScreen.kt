@@ -24,6 +24,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.blazelight.p4oc.R
+import dev.blazelight.p4oc.core.voice.SherpaModelStore
+import dev.blazelight.p4oc.core.voice.VoiceAssistant
 import dev.blazelight.p4oc.core.voice.WhisperModel
 import dev.blazelight.p4oc.core.voice.WhisperModelStore
 import dev.blazelight.p4oc.ui.components.TuiButton
@@ -44,6 +46,8 @@ fun VoiceSettingsScreen(
     val theme = LocalOpenCodeTheme.current
     val selected by viewModel.selectedModel.collectAsStateWithLifecycle()
     val states by viewModel.modelStates.collectAsStateWithLifecycle()
+    val assistant by viewModel.assistant.collectAsStateWithLifecycle()
+    val sherpaState by viewModel.sherpaState.collectAsStateWithLifecycle()
     val sampleResult by viewModel.sampleResult.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -66,19 +70,33 @@ fun VoiceSettingsScreen(
             VoiceRow(
                 title = stringResource(R.string.voice_assistant_whisper),
                 subtitle = stringResource(R.string.voice_assistant_whisper_desc),
-                selected = true,
-                onClick = {},
+                selected = assistant == VoiceAssistant.Whisper,
+                onClick = { viewModel.selectAssistant(VoiceAssistant.Whisper) },
             )
-            SectionHeader(title = stringResource(R.string.voice_models_section))
-            WhisperModel.entries.forEach { model ->
-                VoiceModelRow(
-                    model = model,
-                    state = states[model.id] ?: WhisperModelStore.State.NotDownloaded,
-                    selected = model == selected,
-                    onSelect = { viewModel.selectModel(model) },
-                    onDownload = { viewModel.download(model) },
-                    onDelete = { viewModel.delete(model) },
+            VoiceRow(
+                title = stringResource(R.string.voice_assistant_sherpa),
+                subtitle = stringResource(R.string.voice_assistant_sherpa_desc),
+                selected = assistant == VoiceAssistant.Sherpa,
+                onClick = { viewModel.selectAssistant(VoiceAssistant.Sherpa) },
+            )
+            SectionHeader(title = "Model")
+            if (assistant == VoiceAssistant.Sherpa) {
+                SherpaModelRow(
+                    state = sherpaState,
+                    onDownload = viewModel::downloadSherpa,
+                    onDelete = viewModel::deleteSherpa,
                 )
+            } else {
+                WhisperModel.entries.forEach { model ->
+                    VoiceModelRow(
+                        model = model,
+                        state = states[model.id] ?: WhisperModelStore.State.NotDownloaded,
+                        selected = model == selected,
+                        onSelect = { viewModel.selectModel(model) },
+                        onDownload = { viewModel.download(model) },
+                        onDelete = { viewModel.delete(model) },
+                    )
+                }
             }
             Text(
                 text = stringResource(R.string.voice_models_note),
@@ -93,7 +111,13 @@ fun VoiceSettingsScreen(
                         val bytes = runCatching {
                             context.assets.open("jfk.wav").use { it.readBytes() }
                         }.getOrNull()
-                        if (bytes != null) viewModel.transcribeSample(bytes)
+                        if (bytes != null) {
+                            if (assistant == VoiceAssistant.Sherpa) {
+                                viewModel.transcribeSherpaSample(bytes)
+                            } else {
+                                viewModel.transcribeSample(bytes)
+                            }
+                        }
                     },
                     modifier = Modifier
                         .padding(horizontal = Spacing.lg)
@@ -228,7 +252,57 @@ private fun SectionHeader(title: String) {
 private const val BYTES_PER_MB = 1024.0 * 1024
 private const val BYTES_PER_GB = 1024.0 * 1024 * 1024
 
-@Suppress("MagicNumber")
+@Suppress("MagicNumber", "FunctionNaming")
+@Composable
+private fun SherpaModelRow(
+    state: SherpaModelStore.State,
+    onDownload: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("voice_model_sherpa")
+            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Streaming Zipformer (English)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = theme.text,
+            )
+            Text(
+                text = "70 MB · sherpa-onnx · true streaming",
+                style = MaterialTheme.typography.bodySmall,
+                color = theme.textMuted,
+            )
+        }
+        when (state) {
+            is SherpaModelStore.State.Ready -> TuiTextButton(
+                onClick = onDelete,
+                modifier = Modifier.testTag("voice_model_delete_sherpa"),
+            ) { Text(stringResource(R.string.voice_model_delete)) }
+            is SherpaModelStore.State.Downloading -> Text(
+                text = "${(state.bytes * 100 / state.total.coerceAtLeast(1))}%",
+                style = MaterialTheme.typography.bodySmall,
+                color = theme.textMuted,
+            )
+            is SherpaModelStore.State.Failed -> Column {
+                Text(text = state.message, style = MaterialTheme.typography.bodySmall, color = theme.error)
+                TuiButton(onClick = onDownload) { Text(stringResource(R.string.voice_model_retry)) }
+            }
+            SherpaModelStore.State.NotDownloaded -> TuiButton(
+                onClick = onDownload,
+                modifier = Modifier.testTag("voice_model_download_sherpa"),
+            ) { Text(stringResource(R.string.voice_model_download)) }
+        }
+    }
+    HorizontalDivider(thickness = Sizing.dividerThickness, color = theme.borderSubtle)
+}
+
 private fun formatBytes(bytes: Long): String = when {
     bytes >= BYTES_PER_GB -> String.format(Locale.US, "%.1f GB", bytes / BYTES_PER_GB)
     else -> String.format(Locale.US, "%.0f MB", bytes / BYTES_PER_MB)

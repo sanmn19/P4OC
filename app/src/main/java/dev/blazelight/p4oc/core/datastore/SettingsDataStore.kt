@@ -227,6 +227,7 @@ class SettingsDataStore constructor(
 
         // Voice input keys
         private val KEY_VOICE_MODEL = stringPreferencesKey("voice_model_id")
+        private val KEY_VOICE_ASSISTANT = stringPreferencesKey("voice_assistant_id")
         private val KEY_RECONNECT_TIMEOUT_SECONDS = intPreferencesKey("reconnect_timeout_seconds")
         private val KEY_KEEP_LIVE_IN_BACKGROUND = booleanPreferencesKey("keep_live_in_background")
 
@@ -304,6 +305,16 @@ class SettingsDataStore constructor(
 
     val voiceModelId: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_VOICE_MODEL] ?: dev.blazelight.p4oc.core.voice.WhisperModel.DEFAULT.id
+    }
+
+    val voiceAssistantId: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_VOICE_ASSISTANT] ?: dev.blazelight.p4oc.core.voice.VoiceAssistant.DEFAULT.id
+    }
+
+    suspend fun setVoiceAssistantId(id: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_VOICE_ASSISTANT] = id
+        }
     }
 
     suspend fun setVoiceModelId(id: String) {

@@ -104,6 +104,8 @@ class ChatViewModelDraftPersistenceTest {
         every { settingsDataStore.visualSettings } returns flowOf(VisualSettings())
         every { settingsDataStore.notificationSettings } returns flowOf(NotificationSettings())
         every { settingsDataStore.voiceModelId } returns flowOf(dev.blazelight.p4oc.core.voice.WhisperModel.DEFAULT.id)
+        every { settingsDataStore.voiceAssistantId } returns
+            flowOf(dev.blazelight.p4oc.core.voice.VoiceAssistant.DEFAULT.id)
         coEvery { settingsDataStore.getSelectedAgentForSession(any()) } returns null
         coEvery { settingsDataStore.setSelectedAgentForSession(any(), any()) } returns Unit
         coEvery { settingsDataStore.getComposerSelectionForSession(any(), any()) } returns null

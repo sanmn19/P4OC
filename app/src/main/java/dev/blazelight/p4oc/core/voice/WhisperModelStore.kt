@@ -44,6 +44,16 @@ class WhisperModelStore(private val context: Context) {
 
     fun modelFile(model: WhisperModel): File = File(modelsDir(), model.fileName)
 
+    /** Currently selected model, kept in sync by the settings screen. */
+    @Volatile
+    private var selected: WhisperModel = WhisperModel.DEFAULT
+
+    fun selectedModel(): WhisperModel = selected
+
+    fun select(model: WhisperModel) {
+        selected = model
+    }
+
     fun isReady(model: WhisperModel): Boolean = modelFile(model).length() > 0
 
     private fun modelsDir(): File = File(context.filesDir, DIR).apply { mkdirs() }

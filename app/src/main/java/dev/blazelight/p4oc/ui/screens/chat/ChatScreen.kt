@@ -226,19 +226,33 @@ fun ChatScreen(
         launchedAttachmentOwner = null
     }
     val voiceModel by viewModel.voiceModel.collectAsStateWithLifecycle()
-    val voiceModelStore: dev.blazelight.p4oc.core.voice.WhisperModelStore = koinInject()
-    val voiceController = remember {
-        dev.blazelight.p4oc.core.voice.VoiceInputController(voiceModelStore)
+    val voiceAssistant by viewModel.voiceAssistant.collectAsStateWithLifecycle()
+    val whisperModelStore: dev.blazelight.p4oc.core.voice.WhisperModelStore = koinInject()
+    val sherpaModelStore: dev.blazelight.p4oc.core.voice.SherpaModelStore = koinInject()
+    val whisperController = remember {
+        dev.blazelight.p4oc.core.voice.VoiceInputController(whisperModelStore)
     }
+    val sherpaController = remember {
+        dev.blazelight.p4oc.core.voice.SherpaVoiceController(sherpaModelStore)
+    }
+    val voiceController: dev.blazelight.p4oc.core.voice.VoiceController =
+        if (voiceAssistant == dev.blazelight.p4oc.core.voice.VoiceAssistant.Sherpa) {
+            sherpaController
+        } else {
+            whisperController
+        }
     val voiceState by voiceController.state.collectAsStateWithLifecycle()
     DisposableEffect(Unit) {
-        onDispose { voiceController.release() }
+        onDispose {
+            whisperController.release()
+            sherpaController.release()
+        }
     }
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
-            voiceController.start(voiceModel) { viewModel.updateInput(it) }
+            voiceController.start { viewModel.updateInput(it) }
         }
     }
     val startVoice: () -> Unit = {
@@ -247,7 +261,7 @@ fun ChatScreen(
             android.Manifest.permission.RECORD_AUDIO,
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (granted) {
-            voiceController.start(voiceModel) { viewModel.updateInput(it) }
+            voiceController.start { viewModel.updateInput(it) }
         } else {
             micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         }
@@ -627,24 +641,24 @@ fun ChatScreen(
                             promptHistorySessionId = uiState.session?.id,
                             enterToSend = chatSettings.enterToSend,
                             voiceState = when (voiceState.phase) {
-                                dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Listening ->
+                                dev.blazelight.p4oc.core.voice.VoicePhase.Listening ->
                                     dev.blazelight.p4oc.ui.components.chat.VoiceButtonState.Listening
-                                dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Preparing ->
+                                dev.blazelight.p4oc.core.voice.VoicePhase.Preparing ->
                                     dev.blazelight.p4oc.ui.components.chat.VoiceButtonState.Preparing
                                 else -> dev.blazelight.p4oc.ui.components.chat.VoiceButtonState.Idle
                             },
                             onMicClick = {
                                 when (voiceState.phase) {
-                                    dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Listening ->
+                                    dev.blazelight.p4oc.core.voice.VoicePhase.Listening ->
                                         voiceController.stop { viewModel.updateInput(it) }
-                                    dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Preparing -> Unit
+                                    dev.blazelight.p4oc.core.voice.VoicePhase.Preparing -> Unit
                                     else -> startVoice()
                                 }
                             },
                             onMicLongPress = {
                                 val listening =
                                     voiceState.phase ==
-                                        dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Listening
+                                        dev.blazelight.p4oc.core.voice.VoicePhase.Listening
                                 if (listening) {
                                     voiceController.stopAndSend { text ->
                                         viewModel.updateInput(text)

@@ -90,6 +90,16 @@ class ChatViewModel constructor(
     val filePickerManager = FilePickerManager(workspaceClient, viewModelScope, uploadCoordinator, settingsDataStore)
     val mediaLoader: ChatMediaLoader = WorkspaceChatMediaLoader(workspaceClient, serverConnectionRegistry)
 
+    /** Speech engine chosen in Settings -> Voice. */
+    val voiceAssistant: StateFlow<dev.blazelight.p4oc.core.voice.VoiceAssistant> =
+        settingsDataStore.voiceAssistantId
+            .map { dev.blazelight.p4oc.core.voice.VoiceAssistant.fromId(it) }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(VOICE_MODEL_SUBSCRIPTION_MS),
+                dev.blazelight.p4oc.core.voice.VoiceAssistant.DEFAULT,
+            )
+
     /** Whisper model chosen in Settings -> Voice. */
     val voiceModel: StateFlow<dev.blazelight.p4oc.core.voice.WhisperModel> =
         settingsDataStore.voiceModelId
