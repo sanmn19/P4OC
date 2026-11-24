@@ -3,6 +3,7 @@ package dev.blazelight.p4oc
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -35,6 +36,7 @@ import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.log.CrashRecorder
 import dev.blazelight.p4oc.core.notification.NotificationRoute
 import dev.blazelight.p4oc.core.notification.NotificationRouteCodec
+import dev.blazelight.p4oc.core.share.ShareInbox
 import dev.blazelight.p4oc.ui.navigation.NavGraph
 import dev.blazelight.p4oc.ui.theme.InterfaceScale
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
@@ -51,6 +53,7 @@ import java.io.IOException
 class MainActivity : ComponentActivity() {
 
     private val settingsDataStore: SettingsDataStore by inject()
+    private val shareInbox: ShareInbox by inject()
     private val pendingNotificationRoute = MutableStateFlow<NotificationRoute?>(null)
 
     @Volatile
@@ -95,6 +98,7 @@ class MainActivity : ComponentActivity() {
         splashScreen.setKeepOnScreenCondition { !startDestinationResolved }
         super.onCreate(savedInstanceState)
         pendingNotificationRoute.value = NotificationRouteCodec.read(intent)
+        readSharedPayload(intent)?.let(shareInbox::offer)
 
         // Debug builds record uncaught crashes and surface the trace once on the next launch
         // so a failing device can relay the stack trace without a logcat connection.
@@ -176,6 +180,26 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         NotificationRouteCodec.read(intent)?.let { pendingNotificationRoute.value = it }
+        readSharedPayload(intent)?.let(shareInbox::offer)
+    }
+
+    /** Streams handed over by the system share sheet, plus optional shared text. */
+    @Suppress("ReturnCount")
+    private fun readSharedPayload(intent: Intent?): ShareInbox.Payload? {
+        intent ?: return null
+        if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE) {
+            return null
+        }
+        val uris = if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+        } else {
+            listOfNotNull(intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
+        }
+        if (uris.isEmpty()) return null
+        return ShareInbox.Payload(
+            uris = uris.map(Uri::toString),
+            text = intent.getStringExtra(Intent.EXTRA_TEXT),
+        )
     }
 
     private companion object {

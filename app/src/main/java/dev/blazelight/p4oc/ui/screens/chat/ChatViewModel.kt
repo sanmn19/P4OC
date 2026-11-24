@@ -14,6 +14,7 @@ import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.V2FormInfo
 import dev.blazelight.p4oc.core.network.safeApiCall
+import dev.blazelight.p4oc.core.share.ShareInbox
 import dev.blazelight.p4oc.data.media.ChatMediaLoader
 import dev.blazelight.p4oc.data.media.WorkspaceChatMediaLoader
 import dev.blazelight.p4oc.data.remote.dto.ExecuteCommandRequest
@@ -37,6 +38,7 @@ import dev.blazelight.p4oc.ui.components.chat.SelectedFile
 import dev.blazelight.p4oc.ui.components.chat.toOpenCodeFileUrl
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadCoordinator
+import dev.blazelight.p4oc.ui.screens.files.upload.UploadSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.FlowPreview
@@ -65,6 +67,8 @@ class ChatViewModel constructor(
     private val hapticFeedback: HapticFeedback,
     private val modelSelectionCoordinator: ModelSelectionCoordinator = ModelSelectionCoordinator(),
     private val serverConnectionRegistry: ServerConnectionRegistry? = null,
+    private val shareInbox: ShareInbox = ShareInbox(),
+    private val uploadSource: UploadSource? = null,
 ) : ViewModel() {
     private val sessionId: String = savedStateHandle.get<String>(Screen.Chat.ARG_SESSION_ID)
         ?: throw IllegalArgumentException("sessionId is required for ChatViewModel")
@@ -149,6 +153,27 @@ class ChatViewModel constructor(
         serverConnectionRegistry?.let { registry ->
             observeCommandCatalogEvents(registry)
             observeV2FormEvents(registry)
+        }
+    }
+
+    /** Attaches content handed over by Android's share sheet, then uploads it like a manual pick. */
+    private fun observeSharedContent() {
+        viewModelScope.launch {
+            shareInbox.delivery.collect { delivery ->
+                if (delivery?.sessionId != sessionId) return@collect
+                val payload = shareInbox.consume(sessionId) ?: return@collect
+                val source = uploadSource ?: run {
+                    AppLog.w(TAG, "Shared content dropped: no upload source")
+                    return@collect
+                }
+                AppLog.d(TAG, "Shared content for $sessionId: ${payload.uris.size} item(s)")
+                payload.text?.takeIf(String::isNotBlank)?.let { sharedText ->
+                    if (uiState.value.inputText.isBlank()) {
+                        _uiState.update { it.copy(inputText = sharedText) }
+                    }
+                }
+                filePickerManager.attachSharedFiles(source, payload.uris)
+            }
         }
     }
 
@@ -339,6 +364,7 @@ class ChatViewModel constructor(
         if (restoredFiles.isNotEmpty()) filePickerManager.restoreAttachedFiles(restoredFiles)
         if (restoredFiles.isNotEmpty()) validateRestoredAttachments()
         observeComposerAttachments()
+        observeSharedContent()
         loadSession()
         loadMessages()
         modelAgentManager.loadAgents()

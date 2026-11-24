@@ -20,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -94,6 +95,20 @@ class FilePickerManager(
                     }
                 _phoneReview.value = PhoneAttachmentReview(files = files)
             }
+    }
+
+    /**
+     * Attaches content handed over by Android's share sheet and starts the upload without the review
+     * step: the user already chose the chat, so the files go straight to the composer.
+     */
+    fun attachSharedFiles(source: UploadSource, sourceIds: List<String>) {
+        if (sourceIds.isEmpty()) return
+        reviewPhoneFiles(source, sourceIds)
+        scope.launch {
+            val review = phoneReview.filterNotNull().first { !it.isLoading }
+            if (review.files.isEmpty()) return@launch
+            confirmPhoneUpload(source)
+        }
     }
 
     fun removePhoneFile(sourceId: String) {
