@@ -124,6 +124,7 @@ class NotificationHelper constructor(
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .setShowWhen(false)
+                .setContentIntent(LiveConnectionNotificationIntent.pendingIntent(context))
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .build()
 

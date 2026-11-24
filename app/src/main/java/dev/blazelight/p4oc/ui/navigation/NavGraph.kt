@@ -10,7 +10,6 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
-import dev.blazelight.p4oc.core.notification.NotificationRoute
 import dev.blazelight.p4oc.ui.screens.server.ServerScreenConfig
 import dev.blazelight.p4oc.ui.screens.server.serverScreen
 import dev.blazelight.p4oc.ui.screens.settings.SettingsConnectionContext
@@ -19,7 +18,6 @@ import dev.blazelight.p4oc.ui.screens.settings.SettingsViewModel
 import dev.blazelight.p4oc.ui.screens.settings.VisualSettingsScreen
 import dev.blazelight.p4oc.ui.screens.setup.SetupScreen
 import dev.blazelight.p4oc.ui.tabs.MainTabScreen
-import kotlinx.coroutines.flow.StateFlow
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -36,8 +34,7 @@ private const val ANIMATION_DURATION = 300
 fun NavGraph(
     navController: NavHostController,
     startDestination: String,
-    pendingNotificationRoute: StateFlow<NotificationRoute?>,
-    onNotificationRouteConsumed: (NotificationRoute) -> Unit,
+    pendingIntents: PendingIntents,
 ) {
     NavHost(
         navController = navController,
@@ -110,8 +107,7 @@ fun NavGraph(
         // Main tab container - this is where the tab-based UI lives
         composable(Screen.Sessions.route) {
             MainTabScreen(
-                pendingNotificationRoute = pendingNotificationRoute,
-                onNotificationRouteConsumed = onNotificationRouteConsumed,
+                pendingIntents = pendingIntents,
                 onDisconnect = {
                     navController.navigate(Screen.ServerManagement.route)
                 },

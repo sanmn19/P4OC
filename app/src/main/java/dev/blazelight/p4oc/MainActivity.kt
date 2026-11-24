@@ -34,10 +34,12 @@ import androidx.navigation.compose.rememberNavController
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.log.CrashRecorder
+import dev.blazelight.p4oc.core.notification.LiveConnectionNotificationIntent
 import dev.blazelight.p4oc.core.notification.NotificationRoute
 import dev.blazelight.p4oc.core.notification.NotificationRouteCodec
 import dev.blazelight.p4oc.core.share.ShareInbox
 import dev.blazelight.p4oc.ui.navigation.NavGraph
+import dev.blazelight.p4oc.ui.navigation.PendingIntents
 import dev.blazelight.p4oc.ui.theme.InterfaceScale
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.PocketCodeTheme
@@ -55,6 +57,7 @@ class MainActivity : ComponentActivity() {
     private val settingsDataStore: SettingsDataStore by inject()
     private val shareInbox: ShareInbox by inject()
     private val pendingNotificationRoute = MutableStateFlow<NotificationRoute?>(null)
+    private val pendingOpenLatestChat = MutableStateFlow(false)
 
     @Volatile
     private var startDestinationResolved = false
@@ -97,8 +100,7 @@ class MainActivity : ComponentActivity() {
         val splashScreen = installSplashScreen()
         splashScreen.setKeepOnScreenCondition { !startDestinationResolved }
         super.onCreate(savedInstanceState)
-        pendingNotificationRoute.value = NotificationRouteCodec.read(intent)
-        readSharedPayload(intent)?.let(shareInbox::offer)
+        applyIntent(intent)
 
         // Debug builds record uncaught crashes and surface the trace once on the next launch
         // so a failing device can relay the stack trace without a logcat connection.
@@ -143,12 +145,19 @@ class MainActivity : ComponentActivity() {
                         NavGraph(
                             navController = navController,
                             startDestination = destination,
-                            pendingNotificationRoute = pendingNotificationRoute,
-                            onNotificationRouteConsumed = { route ->
-                                if (pendingNotificationRoute.compareAndSet(route, null)) {
-                                    NotificationRouteCodec.clear(intent)
-                                }
-                            },
+                            pendingIntents = PendingIntents(
+                                notificationRoute = pendingNotificationRoute,
+                                onNotificationRouteConsumed = { route ->
+                                    if (pendingNotificationRoute.compareAndSet(route, null)) {
+                                        NotificationRouteCodec.clear(intent)
+                                    }
+                                },
+                                openLatestChat = pendingOpenLatestChat,
+                                onOpenLatestChatConsumed = {
+                                    pendingOpenLatestChat.value = false
+                                    intent.action = null
+                                },
+                            ),
                         )
                     }
                 }
@@ -179,7 +188,15 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        NotificationRouteCodec.read(intent)?.let { pendingNotificationRoute.value = it }
+        applyIntent(intent)
+    }
+
+    /** Applies the intent's pending actions: notification route, live-connection tap, shared content. */
+    private fun applyIntent(intent: Intent?) {
+        pendingNotificationRoute.value = NotificationRouteCodec.read(intent)
+        if (LiveConnectionNotificationIntent.isOpenLatestChat(intent)) {
+            pendingOpenLatestChat.value = true
+        }
         readSharedPayload(intent)?.let(shareInbox::offer)
     }
 

@@ -116,6 +116,7 @@ import dev.blazelight.p4oc.domain.workspace.WorkspaceAttribution
 import dev.blazelight.p4oc.ui.components.status.connectionStatusColor
 import dev.blazelight.p4oc.ui.components.status.connectionStatusDescription
 import dev.blazelight.p4oc.ui.components.status.connectionStatusLabel
+import dev.blazelight.p4oc.ui.navigation.PendingIntents
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.home.HomeActions
 import dev.blazelight.p4oc.ui.screens.home.HomeSessionActions
@@ -143,10 +144,12 @@ import dev.blazelight.p4oc.ui.workspace.workspaceActionGestures
 import dev.blazelight.p4oc.ui.workspace.workspaceActionMenu
 import dev.blazelight.p4oc.ui.workspace.workspaceClientDirectoryBrowser
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
+private const val OPEN_LATEST_CHAT_ATTEMPTS = 10
+private const val OPEN_LATEST_CHAT_RETRY_MS = 300L
 private const val TAG = "MainTabScreen"
 
 private fun showMainTabMessage(scope: CoroutineScope, host: SnackbarHostState, message: String) {
@@ -1212,8 +1215,7 @@ object MainTabScreen {
     @Composable
     @Suppress("LongMethod")
     operator fun invoke(
-        pendingNotificationRoute: StateFlow<NotificationRoute?>,
-        onNotificationRouteConsumed: (NotificationRoute) -> Unit,
+        pendingIntents: PendingIntents,
         onDisconnect: () -> Unit,
         onSettings: () -> Unit = {},
         modifier: Modifier = Modifier,
@@ -1252,7 +1254,7 @@ object MainTabScreen {
         val savedServerExists = rememberSavedServerExists(savedServers)
         val connectSavedServer = rememberConnectSavedServer(deps.serverConnectionRegistry, savedServers)
 
-        val notificationRoute by pendingNotificationRoute.collectAsStateWithLifecycle()
+        val notificationRoute by pendingIntents.notificationRoute.collectAsStateWithLifecycle()
         LaunchedEffect(notificationRoute, savedServers) {
             val route = notificationRoute ?: return@LaunchedEffect
             val ownedServer = findSavedServerForNotification(route, savedServers)
@@ -1276,7 +1278,7 @@ object MainTabScreen {
                 }
             }
             // Missing/removed servers safely fall back to the current screen; never guess another owner.
-            onNotificationRouteConsumed(route)
+            pendingIntents.onNotificationRouteConsumed(route)
         }
 
         dev.blazelight.p4oc.ui.share.SharePickerHost(
@@ -1285,6 +1287,42 @@ object MainTabScreen {
             shareInbox = koinInject(),
             scope = deps.coroutineScope,
         )
+
+        val openLatest by pendingIntents.openLatestChat.collectAsStateWithLifecycle()
+        LaunchedEffect(openLatest) {
+            if (!openLatest) return@LaunchedEffect
+            // The workspace snapshots load asynchronously after a cold start; retry briefly.
+            repeat(OPEN_LATEST_CHAT_ATTEMPTS) {
+                val latest = tabMaps.workspaceOwners.values
+                    .flatMap { owner ->
+                        owner.sessionRepository.state.value.snapshot.sessions.values
+                            .map { session -> owner to session }
+                    }
+                    .maxByOrNull { (_, session) -> session.session.updatedAt }
+                if (latest != null) {
+                    val (owner, session) = latest
+                    val existing = deps.tabManager.findSessionTab(
+                        owner.workspace.server,
+                        session.workspace.key,
+                        session.session.id,
+                    )
+                    if (existing != null) {
+                        deps.tabManager.focusTab(existing.id)
+                    } else {
+                        deps.tabManager.createTab(
+                            startRoute = Screen.Chat.createRoute(session.session.id),
+                            workspaceKey = session.workspace.key,
+                            serverRef = owner.workspace.server,
+                            focus = true,
+                        )
+                    }
+                    pendingIntents.onOpenLatestChatConsumed()
+                    return@LaunchedEffect
+                }
+                delay(OPEN_LATEST_CHAT_RETRY_MS)
+            }
+            pendingIntents.onOpenLatestChatConsumed()
+        }
 
         mainTabRestoreEffect(deps, savedServers, uiState)
         savedServerConnectionEffect(deps.serverConnectionRegistry, savedServers)
