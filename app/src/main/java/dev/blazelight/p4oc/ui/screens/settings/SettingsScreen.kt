@@ -52,6 +52,7 @@ fun SettingsScreen(
     onAgentsConfig: () -> Unit = {},
     onSkills: () -> Unit = {},
     onNotificationSettings: () -> Unit = {},
+    onVoiceSettings: () -> Unit = {},
     onConnectionSettings: () -> Unit = {},
     onLicenses: () -> Unit = {}
 ) {
@@ -176,6 +177,15 @@ fun SettingsScreen(
                 onClick = onNotificationSettings,
                 showChevron = true,
                 testTag = "settings_notifications_item"
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Mic,
+                title = stringResource(R.string.settings_voice),
+                subtitle = stringResource(R.string.settings_voice_desc),
+                onClick = onVoiceSettings,
+                showChevron = true,
+                testTag = "settings_voice_item"
             )
 
             SettingsItem(

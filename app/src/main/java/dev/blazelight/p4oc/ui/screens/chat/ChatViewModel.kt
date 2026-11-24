@@ -90,6 +90,16 @@ class ChatViewModel constructor(
     val filePickerManager = FilePickerManager(workspaceClient, viewModelScope, uploadCoordinator, settingsDataStore)
     val mediaLoader: ChatMediaLoader = WorkspaceChatMediaLoader(workspaceClient, serverConnectionRegistry)
 
+    /** Whisper model chosen in Settings -> Voice. */
+    val voiceModel: StateFlow<dev.blazelight.p4oc.core.voice.WhisperModel> =
+        settingsDataStore.voiceModelId
+            .map { dev.blazelight.p4oc.core.voice.WhisperModel.fromId(it) }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(VOICE_MODEL_SUBSCRIPTION_MS),
+                dev.blazelight.p4oc.core.voice.WhisperModel.DEFAULT,
+            )
+
     // --- Core state ---
     private val _uiState = MutableStateFlow(ChatUiState(inputText = restoredInputText()))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
@@ -281,6 +291,7 @@ class ChatViewModel constructor(
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_CONFLICT = 409
         private const val KEY_DRAFT_TEXT = "chat_draft_text"
+        private const val VOICE_MODEL_SUBSCRIPTION_MS = 5_000L
         private const val KEY_ATTACHED_FILES = "chat_attached_files"
         private const val COMMAND_CATALOG_REFRESH_DEBOUNCE_MS = 150L
         private val RESPONSE_RECONCILIATION_DELAYS_MS = listOf(2_000L, 5_000L, 10_000L, 20_000L)

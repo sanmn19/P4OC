@@ -70,6 +70,7 @@ sealed class Screen(val route: String) {
     data object Skills : Screen("settings/skills")
 
     data object NotificationSettings : Screen("settings/notifications")
+    data object VoiceSettings : Screen("settings/voice")
 
     data object ConnectionSettings : Screen("settings/connection")
 

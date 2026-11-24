@@ -163,6 +163,7 @@ internal fun encodeServerRouting(routing: Map<String, NotificationRoutingMode>):
 internal fun pruneServerRouting(stored: String?, endpointKey: String): String? =
     encodeServerRouting(decodeServerRouting(stored) - endpointKey)
 
+@Suppress("LargeClass")
 class SettingsDataStore constructor(
     private val context: Context,
     private val credentialStore: CredentialStore
@@ -223,6 +224,9 @@ class SettingsDataStore constructor(
 
         // Connection settings keys
         private val KEY_AUTO_RECONNECT = booleanPreferencesKey("auto_reconnect")
+
+        // Voice input keys
+        private val KEY_VOICE_MODEL = stringPreferencesKey("voice_model_id")
         private val KEY_RECONNECT_TIMEOUT_SECONDS = intPreferencesKey("reconnect_timeout_seconds")
         private val KEY_KEEP_LIVE_IN_BACKGROUND = booleanPreferencesKey("keep_live_in_background")
 
@@ -297,6 +301,16 @@ class SettingsDataStore constructor(
     // throwing: this is read while the activity attaches, where a throw would crash every launch.
     private fun Preferences.interfaceScale(): Int =
         InterfaceScale.sanitize(asMap()[KEY_INTERFACE_SCALE] as? Int)
+
+    val voiceModelId: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_VOICE_MODEL] ?: dev.blazelight.p4oc.core.voice.WhisperModel.DEFAULT.id
+    }
+
+    suspend fun setVoiceModelId(id: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_VOICE_MODEL] = id
+        }
+    }
 
     val onboardingCompleted: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_ONBOARDING_COMPLETED] ?: false

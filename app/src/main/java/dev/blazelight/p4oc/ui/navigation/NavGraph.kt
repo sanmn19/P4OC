@@ -140,6 +140,9 @@ fun NavGraph(
                 onNotificationSettings = {
                     navController.navigate(Screen.NotificationSettings.route)
                 },
+                onVoiceSettings = {
+                    navController.navigate(Screen.VoiceSettings.route)
+                },
                 onConnectionSettings = {
                     navController.navigate(Screen.ConnectionSettings.route)
                 },
@@ -163,6 +166,12 @@ fun NavGraph(
 
         composable(Screen.ChatSettings.route) {
             dev.blazelight.p4oc.ui.screens.settings.ChatSettingsScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.VoiceSettings.route) {
+            dev.blazelight.p4oc.ui.screens.settings.VoiceSettingsScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

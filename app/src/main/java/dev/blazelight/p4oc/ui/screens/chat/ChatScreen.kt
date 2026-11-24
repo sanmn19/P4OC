@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -77,6 +78,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 import org.koin.androidx.compose.koinViewModel
 
 internal fun pendingPermissionAttentionVersion(pendingPermissionCallIds: Set<String>): String =
@@ -222,6 +224,33 @@ fun ChatScreen(
             }
         }
         launchedAttachmentOwner = null
+    }
+    val voiceModel by viewModel.voiceModel.collectAsStateWithLifecycle()
+    val voiceModelStore: dev.blazelight.p4oc.core.voice.WhisperModelStore = koinInject()
+    val voiceController = remember {
+        dev.blazelight.p4oc.core.voice.VoiceInputController(voiceModelStore)
+    }
+    val voiceState by voiceController.state.collectAsStateWithLifecycle()
+    DisposableEffect(Unit) {
+        onDispose { voiceController.release() }
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            voiceController.start(voiceModel) { viewModel.updateInput(it) }
+        }
+    }
+    val startVoice: () -> Unit = {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            voiceController.start(voiceModel) { viewModel.updateInput(it) }
+        } else {
+            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+        }
     }
     val uploadLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
@@ -597,6 +626,32 @@ fun ChatScreen(
                             promptHistory = promptHistory,
                             promptHistorySessionId = uiState.session?.id,
                             enterToSend = chatSettings.enterToSend,
+                            voiceState = when (voiceState.phase) {
+                                dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Listening ->
+                                    dev.blazelight.p4oc.ui.components.chat.VoiceButtonState.Listening
+                                dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Preparing ->
+                                    dev.blazelight.p4oc.ui.components.chat.VoiceButtonState.Preparing
+                                else -> dev.blazelight.p4oc.ui.components.chat.VoiceButtonState.Idle
+                            },
+                            onMicClick = {
+                                when (voiceState.phase) {
+                                    dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Listening ->
+                                        voiceController.stop { viewModel.updateInput(it) }
+                                    dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Preparing -> Unit
+                                    else -> startVoice()
+                                }
+                            },
+                            onMicLongPress = {
+                                val listening =
+                                    voiceState.phase ==
+                                        dev.blazelight.p4oc.core.voice.VoiceInputController.Phase.Listening
+                                if (listening) {
+                                    voiceController.stop { text ->
+                                        viewModel.updateInput(text)
+                                        viewModel.sendMessage()
+                                    }
+                                }
+                            },
                         )
                     }
                 }

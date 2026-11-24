@@ -1,8 +1,10 @@
 package dev.blazelight.p4oc.ui.components.chat
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -21,6 +23,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -28,6 +31,7 @@ import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -46,7 +50,6 @@ import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiCodeFontSize
-import android.view.KeyEvent as AndroidKeyEvent
 
 data class ModelOption(
     val key: String,
@@ -144,6 +147,9 @@ fun ChatInputBar(
     valueSyncGeneration: Long = 0,
     workspaceDirectory: String? = null,
     submissionBlocked: Boolean = false,
+    voiceState: VoiceButtonState = VoiceButtonState.Hidden,
+    onMicClick: () -> Unit = {},
+    onMicLongPress: () -> Unit = {},
 ) {
     val theme = LocalOpenCodeTheme.current
     val focusRequester = remember { FocusRequester() }
@@ -354,6 +360,8 @@ fun ChatInputBar(
                                     if (event.type != KeyEventType.KeyDown) {
                                         return@onPreviewKeyEvent false
                                     }
+                                    val volumeUp = android.view.KeyEvent.KEYCODE_VOLUME_UP
+                                    val volumeDown = android.view.KeyEvent.KEYCODE_VOLUME_DOWN
                                     when (event.key) {
                                         Key.DirectionDown -> {
                                             if (!showSlashCommands) return@onPreviewKeyEvent false
@@ -387,8 +395,8 @@ fun ChatInputBar(
                                             }
                                         }
                                         else -> when (event.key.nativeKeyCode) {
-                                            AndroidKeyEvent.KEYCODE_VOLUME_UP -> navigatePromptHistory(older = true)
-                                            AndroidKeyEvent.KEYCODE_VOLUME_DOWN -> navigatePromptHistory(older = false)
+                                            volumeUp -> navigatePromptHistory(older = true)
+                                            volumeDown -> navigatePromptHistory(older = false)
                                             else -> false
                                         }
                                     }
@@ -409,6 +417,15 @@ fun ChatInputBar(
                                 if (enterToSend) submitFromEnter() else performDefault()
                             },
                             lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4)
+                        )
+                    }
+
+                    if (voiceState != VoiceButtonState.Hidden) {
+                        ComposerVoiceButton(
+                            state = voiceState,
+                            size = controlSize,
+                            onClick = onMicClick,
+                            onLongClick = onMicLongPress,
                         )
                     }
 
@@ -469,6 +486,75 @@ fun ChatInputBar(
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.md)
             )
+        }
+    }
+}
+
+enum class VoiceButtonState { Hidden, Idle, Preparing, Listening }
+
+/**
+ * Mic control: tap starts/stops dictation, long-press stops and sends. Square like the other
+ * composer controls so the row keeps its TUI rhythm.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+@Suppress("FunctionNaming", "LongParameterList")
+private fun ComposerVoiceButton(
+    state: VoiceButtonState,
+    size: Dp,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val theme = LocalOpenCodeTheme.current
+    val listening = state == VoiceButtonState.Listening
+    val preparing = state == VoiceButtonState.Preparing
+    val description = stringResource(
+        when (state) {
+            VoiceButtonState.Listening -> R.string.chat_voice_listening
+            VoiceButtonState.Preparing -> R.string.chat_voice_preparing
+            else -> R.string.chat_action_voice
+        }
+    )
+    val haptic = LocalHapticFeedback.current
+    Box(
+        modifier = Modifier
+            .size(Sizing.minTouchTarget)
+            .combinedClickable(
+                role = Role.Button,
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            )
+            .semantics { this.contentDescription = description }
+            .testTag("chat_voice_button"),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .background(
+                    if (listening) theme.primary else Color.Transparent,
+                    RectangleShape,
+                )
+                .border(
+                    Sizing.strokeMd,
+                    if (listening || preparing) theme.primary else theme.border,
+                    RectangleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (preparing) {
+                TuiLoadingIndicator()
+            } else {
+                Text(
+                    text = if (listening) "◉" else "◌",
+                    color = if (listening) theme.background else theme.textMuted,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
         }
     }
 }

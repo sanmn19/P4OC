@@ -39,6 +39,7 @@ import dev.blazelight.p4oc.ui.screens.settings.SettingsConnectionContext
 import dev.blazelight.p4oc.ui.screens.settings.SettingsViewModel
 import dev.blazelight.p4oc.ui.screens.settings.SkillsViewModel
 import dev.blazelight.p4oc.ui.screens.settings.VisualSettingsViewModel
+import dev.blazelight.p4oc.ui.screens.settings.VoiceSettingsViewModel
 import dev.blazelight.p4oc.ui.screens.terminal.TerminalViewModel
 import dev.blazelight.p4oc.ui.tabs.TabManager
 import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner
@@ -69,6 +70,7 @@ val appModule = module {
     // Core services
     single { SettingsDataStore(androidContext(), get()) }
     single { NotificationHelper(androidContext()) }
+    single { dev.blazelight.p4oc.core.voice.WhisperModelStore(androidContext()) }
     single { dev.blazelight.p4oc.core.share.ShareInbox() }
     single<dev.blazelight.p4oc.ui.screens.files.upload.UploadSource> {
         dev.blazelight.p4oc.ui.screens.files.upload.ContentResolverUploadSource(
@@ -148,6 +150,7 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::NotificationSettingsViewModel)
+    viewModelOf(::VoiceSettingsViewModel)
     viewModelOf(::LicensesViewModel)
     viewModel { params ->
         ProviderConfigViewModel(
