@@ -73,6 +73,10 @@ Java_dev_blazelight_p4oc_core_voice_WhisperBridge_nativeTranscribe(
     params.single_segment = true;
     params.no_timestamps = true;
     params.suppress_blank = true;
+    // Reject non-speech tokens (breaths, background noise) more aggressively.
+    params.suppress_nst = true;
+    params.no_speech_thold = 0.8f;
+    params.entropy_thold = 2.2f;
     params.n_threads = 4;
 
     const int result = whisper_full(session->ctx, params, audio.data(), static_cast<int>(audio.size()));
