@@ -154,7 +154,10 @@ class ChatViewModelTest {
         every { settingsDataStore.recentModels } returns flowOf(emptyList())
         every { settingsDataStore.chatSettings } returns flowOf(ChatSettings())
         every { settingsDataStore.notificationSettings } returns flowOf(NotificationSettings())
-        every { settingsDataStore.voiceModelId } returns flowOf(dev.blazelight.p4oc.core.voice.WhisperModel.DEFAULT.id)
+        every { settingsDataStore.voiceModelId } returns
+            flowOf(dev.blazelight.p4oc.core.voice.WhisperModel.DEFAULT.id)
+        every { settingsDataStore.voiceAssistantId } returns
+            flowOf(dev.blazelight.p4oc.core.voice.VoiceAssistant.DEFAULT.id)
         every { settingsDataStore.visualSettings } returns flowOf(VisualSettings())
         coEvery { settingsDataStore.getComposerSelectionForSession(any(), any()) } returns null
         coEvery { settingsDataStore.setComposerSelectionForSession(any(), any(), any()) } returns Unit

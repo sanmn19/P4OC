@@ -146,6 +146,7 @@ dependencies {
     implementation(libs.eventsource)
 
     // Serialization
+    implementation(files("libs/sherpa-onnx-2.0.3.aar"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.datetime)
 

@@ -71,6 +71,7 @@ val appModule = module {
     single { SettingsDataStore(androidContext(), get()) }
     single { NotificationHelper(androidContext()) }
     single { dev.blazelight.p4oc.core.voice.WhisperModelStore(androidContext()) }
+    single { dev.blazelight.p4oc.core.voice.SherpaModelStore(androidContext()) }
     single { dev.blazelight.p4oc.core.share.ShareInbox() }
     single<dev.blazelight.p4oc.ui.screens.files.upload.UploadSource> {
         dev.blazelight.p4oc.ui.screens.files.upload.ContentResolverUploadSource(
