@@ -71,13 +71,13 @@ private fun shareTargetsFor(
     owner: WorkspaceRepositoryOwner,
     sessions: Collection<dev.blazelight.p4oc.domain.session.WorkspaceSession>,
 ): List<ShareTarget> {
-    val label = owner.workspace.directory ?: owner.workspace.server.displayName
+    val newChatLabel = owner.workspace.directory ?: owner.workspace.server.displayName
     return buildList {
         add(
             ShareTarget(
                 serverRef = owner.workspace.server,
                 workspaceKey = owner.workspace.key,
-                workspaceLabel = label,
+                workspaceLabel = newChatLabel,
                 sessionId = null,
                 title = "New chat",
             )
@@ -85,11 +85,13 @@ private fun shareTargetsFor(
         sessions.sortedByDescending { it.session.updatedAt }
             .take(SHARE_RECENT_SESSION_LIMIT)
             .forEach { session ->
+                // The session's own workspace, not the owner's: a chat tab bound to the
+                // server-global workspace cannot upload attachments.
                 add(
                     ShareTarget(
-                        serverRef = owner.workspace.server,
-                        workspaceKey = owner.workspace.key,
-                        workspaceLabel = label,
+                        serverRef = session.workspace.server,
+                        workspaceKey = session.workspace.key,
+                        workspaceLabel = session.workspace.directory ?: newChatLabel,
                         sessionId = session.session.id,
                         title = session.session.title,
                     )

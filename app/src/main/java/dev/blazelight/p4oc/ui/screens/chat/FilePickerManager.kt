@@ -17,6 +17,7 @@ import dev.blazelight.p4oc.ui.screens.files.upload.sanitizeUploadName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +37,7 @@ class FilePickerManager(
 ) {
     private companion object {
         const val TAG = "FilePickerManager"
+        const val PICKER_READY_POLL_MS = 50L
     }
 
     val workspace = workspaceClient.workspace
@@ -107,6 +109,8 @@ class FilePickerManager(
         scope.launch {
             val review = phoneReview.filterNotNull().first { !it.isLoading }
             if (review.files.isEmpty()) return@launch
+            // The destination comes from the picker listing; wait for it before confirming.
+            while (_isPickerLoading.value) delay(PICKER_READY_POLL_MS)
             confirmPhoneUpload(source)
         }
     }
