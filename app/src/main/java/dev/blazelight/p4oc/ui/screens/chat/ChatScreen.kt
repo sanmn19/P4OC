@@ -543,6 +543,8 @@ fun ChatScreen(
                 onViewChanges = {
                     uiState.session?.id?.let { onViewSessionDiff?.invoke(it) }
                 },
+                isBusy = uiState.isBusy,
+                onMoveToBackground = onNavigateBack,
                 branchName = branchName,
                 todoCount = if (viewModel.supportsSessionTodos) {
                     uiState.todos.count { it.status == "in_progress" || it.status == "pending" }
@@ -567,6 +569,7 @@ fun ChatScreen(
                     SubagentStrip(
                         subagents = subagents,
                         onOpen = { subSessionId -> onOpenSubSession?.invoke(subSessionId) },
+                        onMoveToBackground = onNavigateBack,
                     )
                     // Hairline separating the flat composer from the chat above it.
                     HorizontalDivider(
@@ -1134,6 +1137,7 @@ private fun RunNoticeBanner(message: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList", "LongMethod", "FunctionNaming")
 private fun ChatTopBar(
     title: String,
     connectionState: ConnectionState,
@@ -1145,7 +1149,9 @@ private fun ChatTopBar(
     onViewChanges: () -> Unit,
     branchName: String? = null,
     todoCount: Int = 0,
-    onTodos: () -> Unit = {}
+    onTodos: () -> Unit = {},
+    isBusy: Boolean = false,
+    onMoveToBackground: () -> Unit = {},
 ) {
     val theme = LocalOpenCodeTheme.current
     var showOverflow by remember { mutableStateOf(false) }
@@ -1215,6 +1221,15 @@ private fun ChatTopBar(
                     expanded = showOverflow,
                     onDismissRequest = { showOverflow = false }
                 ) {
+                    if (isBusy) {
+                        TuiDropdownMenuItem(
+                            text = "⇣ Move to background",
+                            onClick = {
+                                showOverflow = false
+                                onMoveToBackground()
+                            }
+                        )
+                    }
                     TuiDropdownMenuItem(
                         text = "⌕ ${stringResource(R.string.chat_search_action)}",
                         onClick = {
@@ -1317,11 +1332,12 @@ internal fun List<MessageWithParts>.toPromptHistory(): List<String> {
 // MessageBlock, groupMessagesIntoBlocks, and MessageBlockView are now in MessageBlockUtils.kt
 
 /** Live child sessions of the open chat: status dot, title, latest line, tap to open. */
-@Suppress("FunctionNaming")
+@Suppress("FunctionNaming", "LongMethod")
 @Composable
 private fun SubagentStrip(
     subagents: List<dev.blazelight.p4oc.ui.screens.chat.ChatViewModel.SubagentStatus>,
     onOpen: (String) -> Unit,
+    onMoveToBackground: () -> Unit,
 ) {
     if (subagents.isEmpty()) return
     val theme = LocalOpenCodeTheme.current
@@ -1360,6 +1376,16 @@ private fun SubagentStrip(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "⇣",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                    modifier = Modifier
+                        .clickable(role = Role.Button, onClick = onMoveToBackground)
+                        .semantics { contentDescription = "Move to background" }
+                        .testTag("subagent_move_to_background")
+                        .padding(horizontal = Spacing.xs),
                 )
                 Text(
                     text = "›",
