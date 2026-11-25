@@ -235,19 +235,22 @@ private fun homeOverview(input: HomeOverviewInput, modifier: Modifier) {
     val results by remember(summary, input.searchQuery) {
         derivedStateOf { summary.filteredHomeResults(input.searchQuery) }
     }
+    // Subagent chats collapse under their parent; expanded ids stay open across refreshes.
+    val expandedSubagents = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>() }
     LazyColumn(
         state = input.listState,
         modifier = modifier.fillMaxSize().testTag("home_screen"),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
-        homeOverviewContent(input, results)
+        homeOverviewContent(input, results, expandedSubagents)
     }
 }
 
 private fun LazyListScope.homeOverviewContent(
     input: HomeOverviewInput,
     results: FilteredHomeResults,
+    expandedSubagents: MutableMap<String, Boolean>,
 ) {
     val summary = input.summary
     item { homeHeader(summary, input.actions) }
@@ -263,7 +266,7 @@ private fun LazyListScope.homeOverviewContent(
     }
     // Workspaces first, then the sessions themselves, so resuming a session is one tap from Home.
     homeWorkspaces(input, results.workspaces)
-    HomeSessions(input, results.sessions)
+    HomeSessions(input, results.sessions, expandedSubagents)
     if (input.searchQuery.isBlank()) {
         connectedServers(input, summary.servers)
     }
@@ -316,9 +319,18 @@ private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
     )
 }
 
-private val HomeSessions: LazyListScope.(HomeOverviewInput, List<SessionPreview>) -> Unit = { input, sessions ->
-    item { sectionLabel("Sessions · ${sessions.size}") }
-    if (sessions.isEmpty()) {
+private val HomeSessions: LazyListScope.(
+    HomeOverviewInput,
+    List<SessionPreview>,
+    MutableMap<String, Boolean>,
+) -> Unit = { input, sessions, expandedSubagents ->
+    val knownIds = sessions.map { it.sessionId.value }.toSet()
+    val childrenByParent = sessions
+        .filter { it.parentId != null && it.parentId in knownIds }
+        .groupBy { it.parentId.orEmpty() }
+    val roots = sessions.filter { it.parentId == null || it.parentId !in knownIds }
+    item { sectionLabel("Sessions · ${roots.size}") }
+    if (roots.isEmpty()) {
         item {
             infoCard(
                 if (input.searchQuery.isNotBlank()) "No matching sessions" else "No sessions yet",
@@ -326,17 +338,41 @@ private val HomeSessions: LazyListScope.(HomeOverviewInput, List<SessionPreview>
             )
         }
     } else {
-        items(
-            items = sessions,
-            key = { "${it.serverRef.endpointKey}:${it.sessionId.value}" },
-        ) { session ->
-            sessionRow(
-                session = session,
-                workspaceName = input.summary.labels.primaryFor(session.serverRef, session.groupKey),
-                sessionActions = input.actions.sessionActions,
-                onResume = { input.actions.onResumeSession(session) },
-                onWorkspace = { input.onWorkspaceClick(input.summary.workspaceFor(session)) },
-            )
+        roots.forEach { session ->
+            val children = childrenByParent[session.sessionId.value].orEmpty()
+            val expanded = expandedSubagents[session.sessionId.value] == true
+            item(key = "${session.serverRef.endpointKey}:${session.sessionId.value}") {
+                sessionRow(
+                    session = session,
+                    workspaceName = input.summary.labels.primaryFor(session.serverRef, session.groupKey),
+                    sessionActions = input.actions.sessionActions,
+                    onResume = { input.actions.onResumeSession(session) },
+                    onWorkspace = { input.onWorkspaceClick(input.summary.workspaceFor(session)) },
+                    subagentCount = children.size,
+                    subagentsExpanded = expanded,
+                    onToggleSubagents = if (children.isEmpty()) {
+                        null
+                    } else {
+                        {
+                            expandedSubagents[session.sessionId.value] = !expanded
+                        }
+                    },
+                )
+            }
+            if (expanded) {
+                children.forEach { child ->
+                    item(key = "${child.serverRef.endpointKey}:${child.sessionId.value}") {
+                        sessionRow(
+                            session = child,
+                            workspaceName = input.summary.labels.primaryFor(child.serverRef, child.groupKey),
+                            sessionActions = input.actions.sessionActions,
+                            onResume = { input.actions.onResumeSession(child) },
+                            onWorkspace = { input.onWorkspaceClick(input.summary.workspaceFor(child)) },
+                            indented = true,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -705,13 +741,17 @@ private fun WorkspaceSummary.displayName(): String = label?.primary ?: workspace
 private fun WorkspaceSummary.pathText(): String = label?.path ?: workspaceKey.detailLabel()
 
 @Composable
-@Suppress("LongMethod")
+@Suppress("LongMethod", "LongParameterList")
 private fun sessionRow(
     session: SessionPreview,
     workspaceName: String?,
     sessionActions: HomeSessionActions?,
     onResume: () -> Unit,
     onWorkspace: (() -> Unit)? = null,
+    subagentCount: Int = session.childCount,
+    subagentsExpanded: Boolean = false,
+    onToggleSubagents: (() -> Unit)? = null,
+    indented: Boolean = false,
 ) {
     val theme = LocalOpenCodeTheme.current
     homeSessionRowSurface(
@@ -719,6 +759,7 @@ private fun sessionRow(
         sessionActions = sessionActions,
         testTag = "home_session_${session.serverRef.endpointKey}_${session.sessionId.value}",
         onResume = onResume,
+        modifier = if (indented) Modifier.padding(start = Spacing.lg) else Modifier,
     ) {
         Row(
             Modifier.fillMaxWidth().height(IntrinsicSize.Min),
@@ -757,11 +798,16 @@ private fun sessionRow(
                             style = MaterialTheme.typography.labelSmall,
                             color = theme.textMuted,
                         )
-                        if (session.childCount > 0) {
+                        if (subagentCount > 0) {
                             Text(
-                                "[${session.childCount} sub]",
+                                "${if (subagentsExpanded) "▾" else "▸"} [$subagentCount sub]",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = theme.info,
+                                modifier = if (onToggleSubagents != null) {
+                                    Modifier.clickable(role = Role.Button, onClick = onToggleSubagents)
+                                } else {
+                                    Modifier
+                                },
                             )
                         }
                         if (session.additions > 0) {
@@ -1066,11 +1112,13 @@ private fun workspaceSessionRow(
 
 /** Tap resumes the session; long-press opens the shared session action menu when a host routes actions. */
 @Composable
+@Suppress("LongParameterList")
 private fun homeSessionRowSurface(
     session: SessionPreview,
     sessionActions: HomeSessionActions?,
     testTag: String,
     onResume: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val theme = LocalOpenCodeTheme.current
@@ -1079,7 +1127,7 @@ private fun homeSessionRowSurface(
             onClick = onResume,
             shape = RectangleShape,
             color = theme.backgroundElement,
-            modifier = Modifier.fillMaxWidth().testTag(testTag),
+            modifier = Modifier.fillMaxWidth().testTag(testTag).then(modifier),
             content = content,
         )
         return
@@ -1109,6 +1157,7 @@ private fun homeSessionRowSurface(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag(testTag)
+                .then(modifier)
                 .sessionActionGestures(
                     state = actionsState,
                     subject = subject,
