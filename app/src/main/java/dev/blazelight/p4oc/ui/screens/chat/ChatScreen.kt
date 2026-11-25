@@ -225,6 +225,7 @@ fun ChatScreen(
         }
         launchedAttachmentOwner = null
     }
+    val subagents by viewModel.subagents.collectAsStateWithLifecycle()
     val voiceModel by viewModel.voiceModel.collectAsStateWithLifecycle()
     val voiceAssistant by viewModel.voiceAssistant.collectAsStateWithLifecycle()
     val whisperModelStore: dev.blazelight.p4oc.core.voice.WhisperModelStore = koinInject()
@@ -563,6 +564,10 @@ fun ChatScreen(
                         .imePadding()
                         .navigationBarsPadding()
                 ) {
+                    SubagentStrip(
+                        subagents = subagents,
+                        onOpen = { subSessionId -> onOpenSubSession?.invoke(subSessionId) },
+                    )
                     // Hairline separating the flat composer from the chat above it.
                     HorizontalDivider(
                         color = LocalOpenCodeTheme.current.border,
@@ -1310,3 +1315,68 @@ internal fun List<MessageWithParts>.toPromptHistory(): List<String> {
 }
 
 // MessageBlock, groupMessagesIntoBlocks, and MessageBlockView are now in MessageBlockUtils.kt
+
+/** Live child sessions of the open chat: status dot, title, latest line, tap to open. */
+@Suppress("FunctionNaming")
+@Composable
+private fun SubagentStrip(
+    subagents: List<dev.blazelight.p4oc.ui.screens.chat.ChatViewModel.SubagentStatus>,
+    onOpen: (String) -> Unit,
+) {
+    if (subagents.isEmpty()) return
+    val theme = LocalOpenCodeTheme.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+    ) {
+        subagents.forEach { subagent ->
+            val status = subagent.status
+            val running = status is dev.blazelight.p4oc.domain.model.SessionStatus.Busy ||
+                status is dev.blazelight.p4oc.domain.model.SessionStatus.Retry
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button) { onOpen(subagent.sessionId) }
+                    .padding(vertical = Spacing.xxs),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (running) "●" else "○",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (running) theme.primary else theme.textMuted,
+                )
+                Text(
+                    text = "subagent",
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.secondary,
+                )
+                Text(
+                    text = subagent.title,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "›",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                )
+            }
+            subagent.lastLine?.let { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = Spacing.lg),
+                )
+            }
+        }
+    }
+}
