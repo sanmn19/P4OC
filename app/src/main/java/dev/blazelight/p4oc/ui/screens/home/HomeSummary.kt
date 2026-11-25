@@ -72,6 +72,8 @@ data class SessionPreview(
     val additions: Int,
     val deletions: Int,
     val isShared: Boolean,
+    /** Parent session id when this is a subagent session. */
+    val parentId: String? = null,
     /** Home workspace this session is grouped under (deepest user root, else its directory). */
     val groupKey: WorkspaceKey = workspaceKey,
 )
@@ -146,6 +148,7 @@ private fun buildSessionPreviews(
             additions = session.summary?.additions ?: 0,
             deletions = session.summary?.deletions ?: 0,
             isShared = session.shareUrl != null,
+            parentId = session.parentID,
             // Attribution reads the server-reported directory, never the loading repository's workspace.
             groupKey = userWorkspaces.groupKeyFor(scoped.serverRef, session.directory),
         )

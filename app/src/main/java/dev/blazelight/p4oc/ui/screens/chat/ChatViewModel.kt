@@ -90,6 +90,58 @@ class ChatViewModel constructor(
     val filePickerManager = FilePickerManager(workspaceClient, viewModelScope, uploadCoordinator, settingsDataStore)
     val mediaLoader: ChatMediaLoader = WorkspaceChatMediaLoader(workspaceClient, serverConnectionRegistry)
 
+    data class SubagentStatus(
+        val sessionId: String,
+        val title: String,
+        val status: SessionStatus?,
+        val lastLine: String?,
+    )
+
+    /** Child sessions of this chat, with live status and their latest assistant line. */
+    val subagents: StateFlow<List<SubagentStatus>> = sessionRepository.state
+        .flatMapLatest { state ->
+            val children = state.snapshot.sessions.values.filter { it.session.parentID == sessionId }
+            if (children.isEmpty()) {
+                flowOf(emptyList())
+            } else {
+                combine(children.map { child -> sessionRepository.messages(child.id) }) { lists ->
+                    children.mapIndexed { index, child ->
+                        val lastLine = lists[index]
+                            .asReversed()
+                            .firstOrNull { it.message is Message.Assistant }
+                            ?.parts
+                            ?.filterIsInstance<Part.Text>()
+                            ?.joinToString(" ") { it.text }
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                        SubagentStatus(
+                            sessionId = child.session.id,
+                            title = child.session.title.ifBlank { "Subagent" },
+                            status = state.snapshot.statuses[child.session.id],
+                            lastLine = lastLine,
+                        )
+                    }
+                }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(VOICE_MODEL_SUBSCRIPTION_MS), emptyList())
+
+    private val loadedSubagentPreviews = mutableSetOf<String>()
+
+    init {
+        // Subagent rows show the child's latest line; load a small window once per child.
+        viewModelScope.launch {
+            subagents.collect { list ->
+                list.filter { it.lastLine == null && loadedSubagentPreviews.add(it.sessionId) }
+                    .forEach { sub ->
+                        runCatching {
+                            sessionRepository.loadMessages(SessionId(sub.sessionId), SUBAGENT_PREVIEW_MESSAGES)
+                        }
+                    }
+            }
+        }
+    }
+
     /** Speech engine chosen in Settings -> Voice. */
     val voiceAssistant: StateFlow<dev.blazelight.p4oc.core.voice.VoiceAssistant> =
         settingsDataStore.voiceAssistantId
@@ -302,6 +354,7 @@ class ChatViewModel constructor(
         private const val HTTP_CONFLICT = 409
         private const val KEY_DRAFT_TEXT = "chat_draft_text"
         private const val VOICE_MODEL_SUBSCRIPTION_MS = 5_000L
+        private const val SUBAGENT_PREVIEW_MESSAGES = 10
         private const val KEY_ATTACHED_FILES = "chat_attached_files"
         private const val COMMAND_CATALOG_REFRESH_DEBOUNCE_MS = 150L
         private val RESPONSE_RECONCILIATION_DELAYS_MS = listOf(2_000L, 5_000L, 10_000L, 20_000L)

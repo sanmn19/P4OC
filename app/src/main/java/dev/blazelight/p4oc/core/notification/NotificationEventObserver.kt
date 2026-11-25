@@ -247,21 +247,31 @@ class NotificationEventObserver constructor(
         if (cachedSettings.notifyOnCompletion) {
             vibrateForNotification()
             scope.launch {
-                val summary = serverConnectionRegistry.completionSummary(
+                // Subagent completions belong to the parent chat, not a separate tab.
+                val parent = serverConnectionRegistry.sessionParent(
                     serverRef = route.serverRef,
                     workspaceKey = route.workspaceKey,
                     sessionId = route.sessionId,
                 )
+                val targetRoute = parent?.parentId?.let { route.copy(sessionId = it) } ?: route
+                val summary = serverConnectionRegistry.completionSummary(
+                    serverRef = targetRoute.serverRef,
+                    workspaceKey = targetRoute.workspaceKey,
+                    sessionId = targetRoute.sessionId,
+                )
+                val body = parent?.childTitle?.takeIf(String::isNotBlank)
+                    ?.let { "Subagent finished: $it" }
+                    ?: summary?.body
                 NotificationDiagnostics.record(
                     "completion notification for ${route.sessionId.takeLast(SESSION_ID_SUFFIX)}" +
                         if (summary?.body == null) " (no text)" else ""
                 )
                 notificationHelper.showCompletionNotification(
-                    sessionId = route.sessionId,
-                    serverRef = route.serverRef,
-                    workspaceKey = route.workspaceKey,
+                    sessionId = targetRoute.sessionId,
+                    serverRef = targetRoute.serverRef,
+                    workspaceKey = targetRoute.workspaceKey,
                     sessionTitle = summary?.sessionTitle,
-                    body = summary?.body,
+                    body = body,
                 )
             }
         }
