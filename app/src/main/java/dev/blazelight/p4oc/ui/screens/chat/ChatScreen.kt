@@ -77,10 +77,12 @@ import dev.blazelight.p4oc.ui.workspace.LocalWorkspaceLabels
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.androidx.compose.koinViewModel
 
+private const val BUSY_SETTLE_INTERVAL_MS = 20_000L
 internal fun pendingPermissionAttentionVersion(pendingPermissionCallIds: Set<String>): String =
     pendingPermissionCallIds.sorted().joinToString(separator = "\u001F")
 
@@ -224,6 +226,14 @@ fun ChatScreen(
             }
         }
         launchedAttachmentOwner = null
+    }
+    val subagents by viewModel.subagents.collectAsStateWithLifecycle()
+    // A missed terminal event leaves the chat "in progress" forever; ask the server while busy.
+    LaunchedEffect(uiState.isBusy) {
+        while (uiState.isBusy) {
+            delay(BUSY_SETTLE_INTERVAL_MS)
+            viewModel.settleIfRunFinished()
+        }
     }
     val voiceModel by viewModel.voiceModel.collectAsStateWithLifecycle()
     val voiceAssistant by viewModel.voiceAssistant.collectAsStateWithLifecycle()
@@ -542,6 +552,8 @@ fun ChatScreen(
                 onViewChanges = {
                     uiState.session?.id?.let { onViewSessionDiff?.invoke(it) }
                 },
+                isBusy = uiState.isBusy,
+                onMoveToBackground = onNavigateBack,
                 branchName = branchName,
                 todoCount = if (viewModel.supportsSessionTodos) {
                     uiState.todos.count { it.status == "in_progress" || it.status == "pending" }
@@ -563,6 +575,11 @@ fun ChatScreen(
                         .imePadding()
                         .navigationBarsPadding()
                 ) {
+                    SubagentStrip(
+                        subagents = subagents,
+                        onOpen = { subSessionId -> onOpenSubSession?.invoke(subSessionId) },
+                        onMoveToBackground = onNavigateBack,
+                    )
                     // Hairline separating the flat composer from the chat above it.
                     HorizontalDivider(
                         color = LocalOpenCodeTheme.current.border,
@@ -1129,6 +1146,7 @@ private fun RunNoticeBanner(message: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList", "LongMethod", "FunctionNaming")
 private fun ChatTopBar(
     title: String,
     connectionState: ConnectionState,
@@ -1140,7 +1158,9 @@ private fun ChatTopBar(
     onViewChanges: () -> Unit,
     branchName: String? = null,
     todoCount: Int = 0,
-    onTodos: () -> Unit = {}
+    onTodos: () -> Unit = {},
+    isBusy: Boolean = false,
+    onMoveToBackground: () -> Unit = {},
 ) {
     val theme = LocalOpenCodeTheme.current
     var showOverflow by remember { mutableStateOf(false) }
@@ -1210,6 +1230,15 @@ private fun ChatTopBar(
                     expanded = showOverflow,
                     onDismissRequest = { showOverflow = false }
                 ) {
+                    if (isBusy) {
+                        TuiDropdownMenuItem(
+                            text = "⇣ Move to background",
+                            onClick = {
+                                showOverflow = false
+                                onMoveToBackground()
+                            }
+                        )
+                    }
                     TuiDropdownMenuItem(
                         text = "⌕ ${stringResource(R.string.chat_search_action)}",
                         onClick = {
@@ -1310,3 +1339,79 @@ internal fun List<MessageWithParts>.toPromptHistory(): List<String> {
 }
 
 // MessageBlock, groupMessagesIntoBlocks, and MessageBlockView are now in MessageBlockUtils.kt
+
+/** Live child sessions of the open chat: status dot, title, latest line, tap to open. */
+@Suppress("FunctionNaming", "LongMethod")
+@Composable
+private fun SubagentStrip(
+    subagents: List<dev.blazelight.p4oc.ui.screens.chat.ChatViewModel.SubagentStatus>,
+    onOpen: (String) -> Unit,
+    onMoveToBackground: () -> Unit,
+) {
+    if (subagents.isEmpty()) return
+    val theme = LocalOpenCodeTheme.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+    ) {
+        subagents.forEach { subagent ->
+            val status = subagent.status
+            val running = status is dev.blazelight.p4oc.domain.model.SessionStatus.Busy ||
+                status is dev.blazelight.p4oc.domain.model.SessionStatus.Retry
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button) { onOpen(subagent.sessionId) }
+                    .padding(vertical = Spacing.xxs),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (running) "●" else "○",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (running) theme.primary else theme.textMuted,
+                )
+                Text(
+                    text = "subagent",
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.secondary,
+                )
+                Text(
+                    text = subagent.title,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "⇣",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                    modifier = Modifier
+                        .clickable(role = Role.Button, onClick = onMoveToBackground)
+                        .semantics { contentDescription = "Move to background" }
+                        .testTag("subagent_move_to_background")
+                        .padding(horizontal = Spacing.xs),
+                )
+                Text(
+                    text = "›",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                )
+            }
+            subagent.lastLine?.let { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = Spacing.lg),
+                )
+            }
+        }
+    }
+}
