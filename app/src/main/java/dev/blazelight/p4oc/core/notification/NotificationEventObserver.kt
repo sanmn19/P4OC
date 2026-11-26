@@ -23,6 +23,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -43,6 +44,7 @@ class NotificationEventObserver constructor(
     companion object {
         private const val TAG = "NotificationEventObserver"
         private const val SESSION_ID_SUFFIX = 6
+        private const val COMPLETION_WATCHDOG_INTERVAL_MS = 20_000L
     }
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -54,6 +56,7 @@ class NotificationEventObserver constructor(
 
     fun start() {
         NotificationDiagnostics.record(deliveryState())
+        startCompletionWatchdog()
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         observeEvents()
         observeSettings()
@@ -282,6 +285,34 @@ class NotificationEventObserver constructor(
      * event never arrives, so on reconnect ask the server for the status of every session that
      * was busy and post the completion for those that settled in the meantime.
      */
+    /**
+     * A terminal SSE event can be missed without a reconnect (stream gap mid-run, run started on
+     * another client). While any chat is tracked busy, ask the server for its status; if it reports
+     * idle, post the completion that the missing event would have posted.
+     */
+    @Suppress("LoopWithTooManyJumpStatements")
+    private fun startCompletionWatchdog() {
+        scope.launch {
+            while (true) {
+                delay(COMPLETION_WATCHDOG_INTERVAL_MS)
+                val routes = completionTracker.busyRoutes()
+                if (routes.isEmpty()) continue
+                routes.forEach { route ->
+                    val statuses = serverConnectionRegistry.sessionStatuses(
+                        route.serverRef,
+                        route.workspaceKey,
+                    ) ?: return@forEach
+                    val status = statuses[route.sessionId]
+                    if (status != null && status.type != "idle") return@forEach
+                    NotificationDiagnostics.record(
+                        "watchdog completion for ${route.sessionId.takeLast(SESSION_ID_SUFFIX)}"
+                    )
+                    if (completionTracker.complete(route)) showCompletionFeedback(route)
+                }
+            }
+        }
+    }
+
     private fun catchUpMissedCompletions() {
         val routes = completionTracker.busyRoutes()
         if (routes.isEmpty()) return

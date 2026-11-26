@@ -77,10 +77,12 @@ import dev.blazelight.p4oc.ui.workspace.LocalWorkspaceLabels
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.androidx.compose.koinViewModel
 
+private const val BUSY_SETTLE_INTERVAL_MS = 20_000L
 internal fun pendingPermissionAttentionVersion(pendingPermissionCallIds: Set<String>): String =
     pendingPermissionCallIds.sorted().joinToString(separator = "\u001F")
 
@@ -226,6 +228,13 @@ fun ChatScreen(
         launchedAttachmentOwner = null
     }
     val subagents by viewModel.subagents.collectAsStateWithLifecycle()
+    // A missed terminal event leaves the chat "in progress" forever; ask the server while busy.
+    LaunchedEffect(uiState.isBusy) {
+        while (uiState.isBusy) {
+            delay(BUSY_SETTLE_INTERVAL_MS)
+            viewModel.settleIfRunFinished()
+        }
+    }
     val voiceModel by viewModel.voiceModel.collectAsStateWithLifecycle()
     val voiceAssistant by viewModel.voiceAssistant.collectAsStateWithLifecycle()
     val whisperModelStore: dev.blazelight.p4oc.core.voice.WhisperModelStore = koinInject()

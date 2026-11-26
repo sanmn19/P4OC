@@ -886,6 +886,28 @@ class ChatViewModel constructor(
         }
     }
 
+    /**
+     * A terminal SSE event can be missed (stream gap, app resumed mid-run, run started on another
+     * client). Without one the chat keeps showing "in progress" for a finished run and the
+     * completion notification never fires. The chat screen calls this while a run is busy; when the
+     * server reports the session idle, the terminal event is synthesized so the UI settles.
+     */
+    @Suppress("ReturnCount")
+    suspend fun settleIfRunFinished() {
+        if (!_uiState.value.isBusy) return
+        val status = runCatching {
+            workspaceClient.getSessionStatuses(workspaceClient.workspace.directory)[sessionId]
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+        }.getOrNull()?.let(SessionMapper::mapStatusToDomain) ?: return
+        if (status is SessionStatus.Busy || status is SessionStatus.Retry) return
+        AppLog.w(TAG, "Session reported idle while still busy locally; settling the run")
+        runCatching {
+            sessionRepository.loadMessages(SessionId(sessionId), limit = SEND_RECONCILE_TAIL_WINDOW)
+        }
+        sessionRepository.acceptEvent(OpenCodeEvent.SessionStatusChanged(sessionId, status))
+    }
+
     private fun ownsResponseReconciliation(initOwnerGeneration: Long?): Boolean =
         initOwnerGeneration == null || isCurrentInitOperation(initOwnerGeneration)
 
