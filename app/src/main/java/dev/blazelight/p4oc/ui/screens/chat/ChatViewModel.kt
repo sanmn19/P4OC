@@ -90,6 +90,15 @@ class ChatViewModel constructor(
     val filePickerManager = FilePickerManager(workspaceClient, viewModelScope, uploadCoordinator, settingsDataStore)
     val mediaLoader: ChatMediaLoader = WorkspaceChatMediaLoader(workspaceClient, serverConnectionRegistry)
 
+    /** A shell command the agent is running right now. */
+    data class RunningScript(
+        val callId: String,
+        val command: String,
+        val lastLine: String?,
+        val output: String,
+        val startedAt: Long,
+    )
+
     data class SubagentStatus(
         val sessionId: String,
         val title: String,
@@ -175,6 +184,35 @@ class ChatViewModel constructor(
 
     /** Convenience alias — ChatScreen reads this directly. */
     val messages: StateFlow<List<MessageWithParts>> = sessionRepository.messages(SessionId(sessionId))
+
+    /** Shell tools currently running in this chat, newest last. */
+    val runningScripts: StateFlow<List<RunningScript>> = messages
+        .map { messageList ->
+            messageList.flatMap { messageWithParts ->
+                messageWithParts.parts.mapNotNull { part ->
+                    val tool = part as? Part.Tool ?: return@mapNotNull null
+                    if (tool.toolName !in SHELL_TOOL_NAMES) return@mapNotNull null
+                    val state = tool.state as? ToolState.Running ?: return@mapNotNull null
+                    val command = (state.input["command"] as? kotlinx.serialization.json.JsonPrimitive)
+                        ?.content
+                        ?.takeIf(String::isNotBlank)
+                        ?: state.title?.takeIf(String::isNotBlank)
+                        ?: tool.toolName
+                    val output = (state.metadata?.get("output") as? kotlinx.serialization.json.JsonPrimitive)
+                        ?.content
+                        .orEmpty()
+                    RunningScript(
+                        callId = tool.callID,
+                        command = command,
+                        lastLine = command.lineSequence().lastOrNull { it.isNotBlank() }?.trim(),
+                        output = output,
+                        startedAt = state.startedAt,
+                    )
+                }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(VOICE_MODEL_SUBSCRIPTION_MS), emptyList())
+
     private val repositorySessionState: StateFlow<dev.blazelight.p4oc.data.session.SessionUiState> =
         sessionRepository.sessionUiState(SessionId(sessionId))
 
@@ -355,6 +393,7 @@ class ChatViewModel constructor(
         private const val KEY_DRAFT_TEXT = "chat_draft_text"
         private const val VOICE_MODEL_SUBSCRIPTION_MS = 5_000L
         private const val SUBAGENT_PREVIEW_MESSAGES = 10
+        private val SHELL_TOOL_NAMES = setOf("bash", "execute", "shell")
         private const val KEY_ATTACHED_FILES = "chat_attached_files"
         private const val COMMAND_CATALOG_REFRESH_DEBOUNCE_MS = 150L
         private val RESPONSE_RECONCILIATION_DELAYS_MS = listOf(2_000L, 5_000L, 10_000L, 20_000L)
