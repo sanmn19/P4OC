@@ -7,11 +7,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
@@ -32,6 +35,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
@@ -77,10 +81,13 @@ import dev.blazelight.p4oc.ui.workspace.LocalWorkspaceLabels
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.androidx.compose.koinViewModel
 
+private const val BUSY_SETTLE_INTERVAL_MS = 20_000L
+private const val RUNNING_SCRIPT_TAIL_LINES = 15
 internal fun pendingPermissionAttentionVersion(pendingPermissionCallIds: Set<String>): String =
     pendingPermissionCallIds.sorted().joinToString(separator = "\u001F")
 
@@ -224,6 +231,16 @@ fun ChatScreen(
             }
         }
         launchedAttachmentOwner = null
+    }
+    val subagents by viewModel.subagents.collectAsStateWithLifecycle()
+    val runningScripts by viewModel.runningScripts.collectAsStateWithLifecycle()
+    var showRunningScripts by remember { mutableStateOf(false) }
+    // A missed terminal event leaves the chat "in progress" forever; ask the server while busy.
+    LaunchedEffect(uiState.isBusy) {
+        while (uiState.isBusy) {
+            delay(BUSY_SETTLE_INTERVAL_MS)
+            viewModel.settleIfRunFinished()
+        }
     }
     val voiceModel by viewModel.voiceModel.collectAsStateWithLifecycle()
     val voiceAssistant by viewModel.voiceAssistant.collectAsStateWithLifecycle()
@@ -542,6 +559,10 @@ fun ChatScreen(
                 onViewChanges = {
                     uiState.session?.id?.let { onViewSessionDiff?.invoke(it) }
                 },
+                isBusy = uiState.isBusy,
+                onMoveToBackground = onNavigateBack,
+                runningScriptCount = runningScripts.size,
+                onRunningScripts = { showRunningScripts = true },
                 branchName = branchName,
                 todoCount = if (viewModel.supportsSessionTodos) {
                     uiState.todos.count { it.status == "in_progress" || it.status == "pending" }
@@ -563,6 +584,11 @@ fun ChatScreen(
                         .imePadding()
                         .navigationBarsPadding()
                 ) {
+                    SubagentStrip(
+                        subagents = subagents,
+                        onOpen = { subSessionId -> onOpenSubSession?.invoke(subSessionId) },
+                        onMoveToBackground = onNavigateBack,
+                    )
                     // Hairline separating the flat composer from the chat above it.
                     HorizontalDivider(
                         color = LocalOpenCodeTheme.current.border,
@@ -1071,6 +1097,13 @@ fun ChatScreen(
         )
     }
 
+    if (showRunningScripts) {
+        RunningScriptsDialog(
+            scripts = runningScripts,
+            onDismiss = { showRunningScripts = false },
+        )
+    }
+
     showRevertDialog?.let { messageId ->
         TuiConfirmDialog(
             onDismissRequest = { showRevertDialog = null },
@@ -1129,6 +1162,7 @@ private fun RunNoticeBanner(message: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList", "LongMethod", "FunctionNaming")
 private fun ChatTopBar(
     title: String,
     connectionState: ConnectionState,
@@ -1140,7 +1174,11 @@ private fun ChatTopBar(
     onViewChanges: () -> Unit,
     branchName: String? = null,
     todoCount: Int = 0,
-    onTodos: () -> Unit = {}
+    onTodos: () -> Unit = {},
+    isBusy: Boolean = false,
+    onMoveToBackground: () -> Unit = {},
+    runningScriptCount: Int = 0,
+    onRunningScripts: () -> Unit = {},
 ) {
     val theme = LocalOpenCodeTheme.current
     var showOverflow by remember { mutableStateOf(false) }
@@ -1160,6 +1198,25 @@ private fun ChatTopBar(
                             fontWeight = FontWeight.SemiBold
                         )
                     )
+                    if (runningScriptCount > 0) {
+                        IconButton(
+                            onClick = onRunningScripts,
+                            modifier = Modifier
+                                .size(Sizing.iconButtonSm)
+                                .testTag("running_scripts_button")
+                                .semantics {
+                                    contentDescription =
+                                        "Running scripts ($runningScriptCount)"
+                                },
+                        ) {
+                            Text(
+                                text = ">_",
+                                color = theme.primary,
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
                 }
                 // Branch sits below the title so it gets full width instead of
                 // being squeezed/truncated in the actions row.
@@ -1210,6 +1267,15 @@ private fun ChatTopBar(
                     expanded = showOverflow,
                     onDismissRequest = { showOverflow = false }
                 ) {
+                    if (isBusy) {
+                        TuiDropdownMenuItem(
+                            text = "⇣ Move to background",
+                            onClick = {
+                                showOverflow = false
+                                onMoveToBackground()
+                            }
+                        )
+                    }
                     TuiDropdownMenuItem(
                         text = "⌕ ${stringResource(R.string.chat_search_action)}",
                         onClick = {
@@ -1310,3 +1376,192 @@ internal fun List<MessageWithParts>.toPromptHistory(): List<String> {
 }
 
 // MessageBlock, groupMessagesIntoBlocks, and MessageBlockView are now in MessageBlockUtils.kt
+
+/** Live child sessions of the open chat: status dot, title, latest line, tap to open. */
+@Suppress("FunctionNaming", "LongMethod")
+@Composable
+private fun SubagentStrip(
+    subagents: List<dev.blazelight.p4oc.ui.screens.chat.ChatViewModel.SubagentStatus>,
+    onOpen: (String) -> Unit,
+    onMoveToBackground: () -> Unit,
+) {
+    if (subagents.isEmpty()) return
+    val theme = LocalOpenCodeTheme.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+    ) {
+        subagents.forEach { subagent ->
+            val status = subagent.status
+            val running = status is dev.blazelight.p4oc.domain.model.SessionStatus.Busy ||
+                status is dev.blazelight.p4oc.domain.model.SessionStatus.Retry
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button) { onOpen(subagent.sessionId) }
+                    .padding(vertical = Spacing.xxs),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (running) "●" else "○",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (running) theme.primary else theme.textMuted,
+                )
+                Text(
+                    text = "subagent",
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.secondary,
+                )
+                Text(
+                    text = subagent.title,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "⇣",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                    modifier = Modifier
+                        .clickable(role = Role.Button, onClick = onMoveToBackground)
+                        .semantics { contentDescription = "Move to background" }
+                        .testTag("subagent_move_to_background")
+                        .padding(horizontal = Spacing.xs),
+                )
+                Text(
+                    text = "›",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                )
+            }
+            subagent.lastLine?.let { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = Spacing.lg),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Popup listing the shell commands the agent is running right now. Each row shows the script and its
+ * last command line; tapping expands the last 15 output lines in place.
+ */
+@Suppress("FunctionNaming", "LongMethod", "MagicNumber")
+@Composable
+private fun RunningScriptsDialog(
+    scripts: List<dev.blazelight.p4oc.ui.screens.chat.ChatViewModel.RunningScript>,
+    onDismiss: () -> Unit,
+) {
+    val theme = LocalOpenCodeTheme.current
+    var expandedCallId by remember { mutableStateOf<String?>(null) }
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(theme.backgroundPanel)
+                .border(Sizing.strokeMd, theme.border, RectangleShape)
+                .padding(Spacing.md)
+                .testTag("running_scripts_dialog"),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Running scripts · ${scripts.size}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = theme.text,
+                )
+                Text(
+                    text = "✕",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = theme.textMuted,
+                    modifier = Modifier
+                        .clickable(role = Role.Button, onClick = onDismiss)
+                        .semantics { contentDescription = "Close" }
+                        .testTag("running_scripts_close")
+                        .padding(Spacing.xs),
+                )
+            }
+            if (scripts.isEmpty()) {
+                Text(
+                    text = "No scripts are running.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = theme.textMuted,
+                )
+            }
+            scripts.forEach { script ->
+                val expanded = expandedCallId == script.callId
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Button) {
+                            expandedCallId = if (expanded) null else script.callId
+                        }
+                        .padding(vertical = Spacing.xs),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (expanded) "▾" else "▸",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = theme.textMuted,
+                        )
+                        Text(
+                            text = script.command.lineSequence().firstOrNull()?.trim()?.take(80)
+                                ?: "bash",
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = theme.text,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        text = script.lastLine ?: script.command.lineSequence().last().trim(),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = theme.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = Spacing.md),
+                    )
+                    if (expanded) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = Sizing.embeddedScrollMaxHeight)
+                                .background(theme.backgroundElement)
+                                .padding(Spacing.sm),
+                        ) {
+                            val tail = script.output.lineSequence().filter { it.isNotBlank() }
+                                .toList()
+                                .takeLast(RUNNING_SCRIPT_TAIL_LINES)
+                            Text(
+                                text = if (tail.isEmpty()) "(no output yet)" else tail.joinToString("\n"),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = theme.textMuted,
+                                modifier = Modifier.verticalScroll(rememberScrollState()),
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(thickness = Sizing.dividerThickness, color = theme.borderSubtle)
+            }
+        }
+    }
+}
