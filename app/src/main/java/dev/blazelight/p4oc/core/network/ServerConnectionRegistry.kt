@@ -266,6 +266,24 @@ class ServerConnectionRegistry constructor(
 
     data class PendingQuestion(val sessionTitle: String?, val question: String?)
 
+    data class SessionParent(val parentId: String, val childTitle: String?)
+
+    /** Parent session id for a subagent session, used to group its notifications under the chat. */
+    @Suppress("ReturnCount")
+    suspend fun sessionParent(
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
+        sessionId: String,
+    ): SessionParent? {
+        val connection = connections[serverRef.endpointKey]?.value ?: return null
+        val directory = (workspaceKey as? WorkspaceKey.Directory)?.value
+        val dto = runCatching {
+            connection.api.getSession(sessionId, directory, null)
+        }.getOrNull() ?: return null
+        val parentId = dto.parentID ?: return null
+        return SessionParent(parentId, dto.title)
+    }
+
     data class CompletionSummary(val sessionTitle: String?, val body: String?)
 
     /** Chat name plus a short excerpt of the last assistant text, for completion notifications. */

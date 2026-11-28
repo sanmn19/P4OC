@@ -15,8 +15,10 @@ import dev.blazelight.p4oc.core.notification.NotificationHelper
 import dev.blazelight.p4oc.domain.server.ServerRef
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -37,6 +39,9 @@ class ConnectionForegroundCoordinator constructor(
 
     companion object {
         private const val TAG = "ConnectionForeground"
+
+        /** Delay before tearing the service down, so a just-requested start can promote. */
+        private const val STOP_GRACE_MS = 2_000L
     }
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -49,6 +54,8 @@ class ConnectionForegroundCoordinator constructor(
 
     @Volatile
     private var startRequested = false
+
+    private var stopJob: Job? = null
 
     fun start() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
@@ -71,9 +78,17 @@ class ConnectionForegroundCoordinator constructor(
 
     override fun onStart(owner: LifecycleOwner) {
         startRequested = false
-        NotificationDiagnostics.record("FGS stop requested (app foreground)")
-        context.stopService(Intent(context, LiveConnectionService::class.java))
-        NotificationHelper.dismissLiveConnection(context)
+        // Stopping while a start is still pending would leave startForegroundService() without its
+        // startForeground() and crash with ForegroundServiceDidNotStartInTimeException. Give a fresh
+        // start time to promote first; a start that happens meanwhile cancels this stop.
+        stopJob?.cancel()
+        stopJob = scope.launch {
+            delay(STOP_GRACE_MS)
+            if (startRequested) return@launch
+            NotificationDiagnostics.record("FGS stop requested (app foreground)")
+            context.stopService(Intent(context, LiveConnectionService::class.java))
+            NotificationHelper.dismissLiveConnection(context)
+        }
     }
 
     override fun onPause(owner: LifecycleOwner) {
@@ -99,6 +114,8 @@ class ConnectionForegroundCoordinator constructor(
             return
         }
         try {
+            stopJob?.cancel()
+            stopJob = null
             context.startForegroundService(intent(context, connected.displayName))
             startRequested = true
             NotificationDiagnostics.record("FGS start requested (${connected.displayName})")

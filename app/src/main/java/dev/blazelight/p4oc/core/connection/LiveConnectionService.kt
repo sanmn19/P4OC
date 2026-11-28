@@ -26,30 +26,21 @@ class LiveConnectionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        // Channels must exist before the foreground notification is built; creating them here keeps
-        // onStartCommand fast enough to satisfy the startForeground() deadline.
-        NotificationHelper.ensureChannels(this)
+        // Promote in onCreate, before onStartCommand can be delayed: the system's deadline starts at
+        // startForegroundService(), and a service stopped before onStartCommand runs (quick
+        // background→foreground flick) otherwise fails with ForegroundServiceDidNotStartInTime.
+        if (!promote(NotificationHelper.liveConnectionNotification(this, null))) {
+            NotificationDiagnostics.record("FGS start rejected in onCreate; stopping")
+            stopSelf()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val serverLabel = intent?.getStringExtra(EXTRA_SERVER_LABEL)
-        // startForeground() must run within a few seconds of startForegroundService(), so it goes
-        // first: channel creation and diagnostics logging happen only after the service is promoted
-        // (a slow first call here is what raised ForegroundServiceDidNotStartInTimeException).
-        val notification = NotificationHelper.liveConnectionNotification(this, serverLabel)
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    NotificationHelper.LIVE_CONNECTION_NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-                )
-            } else {
-                startForeground(NotificationHelper.LIVE_CONNECTION_NOTIFICATION_ID, notification)
-            }
-        } catch (_: IllegalStateException) {
+        // Re-promote with the server label; this also covers a start whose onCreate promotion failed.
+        if (!promote(NotificationHelper.liveConnectionNotification(this, serverLabel))) {
             // ForegroundServiceStartNotAllowedException (an IllegalStateException): observed when
             // START_STICKY resurrected this service in a fully-backgrounded process (null intent)
             // after the OS killed the app — no window exists to grant elevation, and the uncaught
@@ -74,6 +65,22 @@ class LiveConnectionService : Service() {
      * `ForegroundServiceDidNotStopInTimeException`. Stop here and let the coordinator restart the
      * service on the next foreground→background transition (foregrounding resets the budget).
      */
+    /** Calls startForeground with the dataSync type; false when Android refuses to promote. */
+    private fun promote(notification: android.app.Notification): Boolean = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NotificationHelper.LIVE_CONNECTION_NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            )
+        } else {
+            startForeground(NotificationHelper.LIVE_CONNECTION_NOTIFICATION_ID, notification)
+        }
+        true
+    } catch (_: IllegalStateException) {
+        false
+    }
+
     override fun onTimeout(startId: Int, fgsType: Int) {
         NotificationDiagnostics.record("FGS timed out; stopping")
         AppLog.w(TAG, "Live connection foreground timeout reached; stopping service")
